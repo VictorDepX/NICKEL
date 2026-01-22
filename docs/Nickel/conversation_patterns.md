@@ -1,0 +1,1 @@
+(Conversation Patterns do Nickel – conforme definido)

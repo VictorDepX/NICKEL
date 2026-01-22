@@ -1,0 +1,1 @@
+(Personality Guardrails do Nickel – conforme definido)

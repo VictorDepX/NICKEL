@@ -1,0 +1,1 @@
+(Persona Spec do Nickel – conforme definido)

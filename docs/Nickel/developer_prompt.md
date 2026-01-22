@@ -1,0 +1,1 @@
+(Developer Prompt do Nickel – conforme definido)

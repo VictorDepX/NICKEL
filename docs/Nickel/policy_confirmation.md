@@ -1,0 +1,1 @@
+(Policy de Confirmação do Nickel – conforme definido)

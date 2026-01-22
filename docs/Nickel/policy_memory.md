@@ -1,0 +1,1 @@
+(Policy de Memória do Nickel – conforme definido)

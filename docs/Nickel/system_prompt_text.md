@@ -1,0 +1,1 @@
+(System Prompt texto do Nickel – conforme definido)
