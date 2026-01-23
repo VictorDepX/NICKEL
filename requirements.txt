@@ -1,0 +1,8 @@
+fastapi==0.115.2
+uvicorn==0.30.6
+cryptography==43.0.3
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.147.0
+httpx==0.27.2
+pytest==8.3.3
