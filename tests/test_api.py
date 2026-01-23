@@ -7,6 +7,8 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from pathlib import Path
+
 from app import calendar, gmail, oauth, pending_actions
 from app.config import get_settings
 from app.main import app
@@ -514,3 +516,40 @@ def test_responses_not_emotional_language() -> None:
     text = str(response.json()).lower()
     forbidden = ["sorry", "apolog", "regret", "feel", "hope", "happy"]
     assert all(word not in text for word in forbidden)
+
+
+def test_token_store_persists_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    token_path = tmp_path / "tokens.json"
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.setenv("TOKEN_STORE_PATH", str(token_path))
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": datetime(2030, 1, 1, tzinfo=timezone.utc).isoformat(),
+            "scopes": ["scope.a"],
+        },
+    )
+
+    oauth._token_store = None
+    token_store = oauth.get_token_store(get_settings())
+    token = token_store.get("default")
+    assert token is not None
+    assert token["access_token"] == "access"
+
+
+def test_pending_actions_persist_to_disk(tmp_path: Path) -> None:
+    path = tmp_path / "pending.json"
+    pending_actions.configure_pending_actions(path)
+    pending = pending_actions.require_confirmation("email.send", {"raw_base64": "aGVsbG8="})
+
+    pending_actions.configure_pending_actions(path)
+    action = pending_actions.confirm_action(pending["action_id"], True)
+    assert action.tool == "email.send"

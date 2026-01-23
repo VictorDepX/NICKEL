@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -18,8 +20,36 @@ class PendingAction:
 
 
 class PendingActionStore:
-    def __init__(self) -> None:
+    def __init__(self, storage_path: Path | None = None) -> None:
         self._pending: dict[str, PendingAction] = {}
+        self._storage_path = storage_path
+        self._load()
+
+    def _load(self) -> None:
+        if not self._storage_path or not self._storage_path.exists():
+            return
+        data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+        for action_id, payload in data.items():
+            self._pending[action_id] = PendingAction(
+                action_id=payload["action_id"],
+                tool=payload["tool"],
+                payload=payload["payload"],
+                created_at=datetime.fromisoformat(payload["created_at"]),
+                status=payload["status"],
+            )
+
+    def _persist(self) -> None:
+        if not self._storage_path:
+            return
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            action_id: {
+                **asdict(action),
+                "created_at": action.created_at.isoformat(),
+            }
+            for action_id, action in self._pending.items()
+        }
+        self._storage_path.write_text(json.dumps(data), encoding="utf-8")
 
     def create(self, tool: str, payload: dict[str, Any]) -> PendingAction:
         action_id = str(uuid4())
@@ -31,6 +61,7 @@ class PendingActionStore:
             status="pending_confirmation",
         )
         self._pending[action_id] = action
+        self._persist()
         return action
 
     def get(self, action_id: str) -> PendingAction:
@@ -65,6 +96,11 @@ class PendingActionStore:
 pending_actions = PendingActionStore()
 
 
+def configure_pending_actions(storage_path: Path | None) -> None:
+    global pending_actions
+    pending_actions = PendingActionStore(storage_path=storage_path)
+
+
 def require_confirmation(tool: str, payload: dict[str, Any]) -> dict[str, Any]:
     action = pending_actions.create(tool=tool, payload=payload)
     return {
@@ -88,6 +124,7 @@ def cancel_action(action_id: str, confirmed: bool) -> dict[str, Any]:
         )
     action = pending_actions.pop(action_id)
     action.status = "cancelled"
+    pending_actions._persist()
     return {
         "status": action.status,
         "action_id": action.action_id,
@@ -109,4 +146,5 @@ def confirm_action(action_id: str, confirmed: bool) -> PendingAction:
         )
     action = pending_actions.pop(action_id)
     action.status = "confirmed"
+    pending_actions._persist()
     return action
