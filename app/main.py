@@ -4,14 +4,40 @@ from fastapi import FastAPI, HTTPException, Query
 
 from app.actions import execute_action
 from app.calendar import list_events
+from app.chat import handle_chat
 from app.config import get_settings
 from app.gmail import draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
+from app.notes import configure_notes_store
 from app.oauth import exchange_code, start_oauth
-from app.pending_actions import cancel_action, confirm_action, require_confirmation
+from app.spotify import pause as spotify_pause
+from app.spotify import play as spotify_play
+from app.spotify import skip as spotify_skip
+from app.tasks import configure_tasks_store, list_tasks
+from pathlib import Path
+
+from app.pending_actions import (
+    cancel_action,
+    confirm_action,
+    configure_pending_actions,
+    require_confirmation,
+)
 
 app = FastAPI(title="Nickel API", version="0.1.0")
+
+
+@app.on_event("startup")
+def configure_stores() -> None:
+    settings = get_settings()
+    pending_path = (
+        Path(settings.pending_actions_path) if settings.pending_actions_path else None
+    )
+    notes_path = Path(settings.notes_store_path) if settings.notes_store_path else None
+    tasks_path = Path(settings.tasks_store_path) if settings.tasks_store_path else None
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+    configure_tasks_store(tasks_path)
 
 
 @app.get("/health")
@@ -76,6 +102,31 @@ def notes_create(payload: dict[str, object]) -> dict[str, object]:
 @app.post("/tools/tasks/create")
 def tasks_create(payload: dict[str, object]) -> dict[str, object]:
     return require_confirmation("tasks.create", payload)
+
+
+@app.post("/tools/tasks/list")
+def tasks_list(payload: dict[str, object]) -> dict[str, object]:
+    return list_tasks(get_settings(), payload)
+
+
+@app.post("/tools/spotify/play")
+def spotify_play_track(payload: dict[str, object]) -> dict[str, object]:
+    return spotify_play(get_settings(), payload)
+
+
+@app.post("/tools/spotify/pause")
+def spotify_pause_track(payload: dict[str, object]) -> dict[str, object]:
+    return spotify_pause(get_settings(), payload)
+
+
+@app.post("/tools/spotify/skip")
+def spotify_skip_track(payload: dict[str, object]) -> dict[str, object]:
+    return spotify_skip(get_settings(), payload)
+
+
+@app.post("/chat")
+def chat(payload: dict[str, object]) -> dict[str, object]:
+    return handle_chat(get_settings(), payload)
 
 
 @app.post("/confirm")

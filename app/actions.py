@@ -7,7 +7,9 @@ from fastapi import HTTPException
 from app.calendar import create_event, modify_event
 from app.config import Settings
 from app.gmail import send as email_send
+from app.notes import create_note
 from app.pending_actions import PendingAction
+from app.tasks import create_task
 
 
 def execute_action(_settings: Settings, action: PendingAction) -> dict[str, Any]:
@@ -17,6 +19,10 @@ def execute_action(_settings: Settings, action: PendingAction) -> dict[str, Any]
         return modify_event(_settings, action.payload)
     if action.tool == "email.send":
         return email_send(_settings, action.payload)
+    if action.tool == "notes.create":
+        return create_note(_settings, action.payload)
+    if action.tool == "tasks.create":
+        return create_task(_settings, action.payload)
     raise HTTPException(
         status_code=501,
         detail={

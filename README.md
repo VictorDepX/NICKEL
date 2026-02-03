@@ -22,6 +22,17 @@ export GOOGLE_CLIENT_SECRET="..."
 export GOOGLE_REDIRECT_URI="http://localhost:8000/auth/google/callback"
 export GOOGLE_SCOPES="https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events"
 export OAUTH_TOKEN_KEY="cole_uma_chave_fernet"
+export LLM_BASE_URL="https://api.openai.com/v1"
+export LLM_API_KEY="..."
+export LLM_MODEL="gpt-4o-mini"
+export LLM_TIMEOUT_SECONDS="30"
+export TOKEN_STORE_PATH="./data/token_store.json"
+export PENDING_ACTIONS_PATH="./data/pending_actions.json"
+export NOTES_STORE_PATH="./data/notes.json"
+export TASKS_STORE_PATH="./data/tasks.json"
+export SPOTIFY_ACCESS_TOKEN="..."
+export SPOTIFY_DEVICE_ID="..."
+export SPOTIFY_BASE_URL="https://api.spotify.com/v1"
 ```
 
 ## Executar
@@ -48,6 +59,25 @@ uvicorn app.main:app --reload
 
 - Crie rascunho em `/tools/email/draft` (sem confirmação).
 - Envie email em `/tools/email/send` (com confirmação).
+
+## Chat (LLM)
+
+- Envie mensagens para `/chat` com `{ "message": "..." }`.
+
+## Notes (write)
+
+- Crie nota em `/tools/notes/create` (com confirmação).
+
+## Tasks
+
+- Crie tarefa em `/tools/tasks/create` (com confirmação).
+- Liste tarefas em `/tools/tasks/list`.
+
+## Spotify
+
+- Toque algo em `/tools/spotify/play`.
+- Pause em `/tools/spotify/pause`.
+- Próxima faixa em `/tools/spotify/skip`.
 
 ## Confirmação de ações (write)
 
