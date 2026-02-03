@@ -29,6 +29,7 @@ export LLM_TIMEOUT_SECONDS="30"
 export TOKEN_STORE_PATH="./data/token_store.json"
 export PENDING_ACTIONS_PATH="./data/pending_actions.json"
 export NOTES_STORE_PATH="./data/notes.json"
+export TASKS_STORE_PATH="./data/tasks.json"
 export SPOTIFY_ACCESS_TOKEN="..."
 export SPOTIFY_DEVICE_ID="..."
 export SPOTIFY_BASE_URL="https://api.spotify.com/v1"
@@ -66,6 +67,11 @@ uvicorn app.main:app --reload
 ## Notes (write)
 
 - Crie nota em `/tools/notes/create` (com confirmação).
+
+## Tasks
+
+- Crie tarefa em `/tools/tasks/create` (com confirmação).
+- Liste tarefas em `/tools/tasks/list`.
 
 ## Spotify
 

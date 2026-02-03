@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.calendar import list_events as calendar_list
+from app.config import Settings
 from app.config import Settings
 from app.calendar import list_events as calendar_list
 from app.gmail import draft as email_draft
@@ -12,6 +14,10 @@ from app.gmail import search as email_search
 from app.llm import generate_response
 from app.orchestrator import decide_tool
 from app.pending_actions import require_confirmation
+from app.spotify import pause as spotify_pause
+from app.spotify import play as spotify_play
+from app.spotify import skip as spotify_skip
+from app.tasks import list_tasks
 
 
 def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
@@ -92,6 +98,48 @@ def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 "status": "pending_confirmation",
                 "response": response_text,
                 "pending_action": pending,
+            }
+        if tool == "notes.create":
+            pending = require_confirmation("notes.create", action_payload)
+            return {
+                "status": "pending_confirmation",
+                "response": response_text,
+                "pending_action": pending,
+            }
+        if tool == "tasks.create":
+            pending = require_confirmation("tasks.create", action_payload)
+            return {
+                "status": "pending_confirmation",
+                "response": response_text,
+                "pending_action": pending,
+            }
+        if tool == "tasks.list":
+            tool_result = list_tasks(settings, action_payload)
+            return {
+                "status": "ok",
+                "response": response_text,
+                "tool_result": tool_result,
+            }
+        if tool == "spotify.play":
+            tool_result = spotify_play(settings, action_payload)
+            return {
+                "status": "ok",
+                "response": response_text,
+                "tool_result": tool_result,
+            }
+        if tool == "spotify.pause":
+            tool_result = spotify_pause(settings, action_payload)
+            return {
+                "status": "ok",
+                "response": response_text,
+                "tool_result": tool_result,
+            }
+        if tool == "spotify.skip":
+            tool_result = spotify_skip(settings, action_payload)
+            return {
+                "status": "ok",
+                "response": response_text,
+                "tool_result": tool_result,
             }
         raise HTTPException(
             status_code=400,

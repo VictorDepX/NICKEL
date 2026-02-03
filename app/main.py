@@ -14,6 +14,7 @@ from app.oauth import exchange_code, start_oauth
 from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
 from app.spotify import skip as spotify_skip
+from app.tasks import configure_tasks_store, list_tasks
 from pathlib import Path
 
 from app.pending_actions import (
@@ -33,6 +34,10 @@ def configure_stores() -> None:
         Path(settings.pending_actions_path) if settings.pending_actions_path else None
     )
     notes_path = Path(settings.notes_store_path) if settings.notes_store_path else None
+    tasks_path = Path(settings.tasks_store_path) if settings.tasks_store_path else None
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+    configure_tasks_store(tasks_path)
     configure_pending_actions(pending_path)
     configure_notes_store(notes_path)
 
@@ -99,6 +104,11 @@ def notes_create(payload: dict[str, object]) -> dict[str, object]:
 @app.post("/tools/tasks/create")
 def tasks_create(payload: dict[str, object]) -> dict[str, object]:
     return require_confirmation("tasks.create", payload)
+
+
+@app.post("/tools/tasks/list")
+def tasks_list(payload: dict[str, object]) -> dict[str, object]:
+    return list_tasks(get_settings(), payload)
 
 
 @app.post("/tools/spotify/play")

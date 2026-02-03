@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,21 @@ class TokenStore:
     def _load(self) -> None:
         if not self._storage_path or not self._storage_path.exists():
             return
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            self._tokens = {
+                user_id: bytes.fromhex(value) for user_id, value in data.items()
+            }
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "code": "token_store_corrupt",
+                        "message": "Stored token cannot be loaded.",
+                    }
+                },
+            ) from exc
         data = json.loads(self._storage_path.read_text(encoding="utf-8"))
         self._tokens = {user_id: bytes.fromhex(value) for user_id, value in data.items()}
 
@@ -195,6 +211,8 @@ def get_credentials(settings: Settings) -> Credentials:
         )
     expiry_value = token.get("expiry")
     expiry = datetime.fromisoformat(expiry_value) if expiry_value else None
+    if expiry and expiry.tzinfo is not None:
+        expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
     credentials = Credentials(
         token=token.get("access_token"),
         refresh_token=token.get("refresh_token"),

@@ -28,6 +28,26 @@ class PendingActionStore:
     def _load(self) -> None:
         if not self._storage_path or not self._storage_path.exists():
             return
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            for action_id, payload in data.items():
+                self._pending[action_id] = PendingAction(
+                    action_id=payload["action_id"],
+                    tool=payload["tool"],
+                    payload=payload["payload"],
+                    created_at=datetime.fromisoformat(payload["created_at"]),
+                    status=payload["status"],
+                )
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "code": "pending_actions_store_corrupt",
+                        "message": "Pending actions store cannot be loaded.",
+                    }
+                },
+            ) from exc
         data = json.loads(self._storage_path.read_text(encoding="utf-8"))
         for action_id, payload in data.items():
             self._pending[action_id] = PendingAction(

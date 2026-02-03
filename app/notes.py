@@ -29,6 +29,25 @@ class NotesStore:
     def _load(self) -> None:
         if not self._storage_path or not self._storage_path.exists():
             return
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            for note_id, payload in data.items():
+                self._notes[note_id] = Note(
+                    note_id=payload["note_id"],
+                    title=payload.get("title"),
+                    body=payload["body"],
+                    created_at=datetime.fromisoformat(payload["created_at"]),
+                )
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "code": "notes_store_corrupt",
+                        "message": "Notes store cannot be loaded.",
+                    }
+                },
+            ) from exc
         data = json.loads(self._storage_path.read_text(encoding="utf-8"))
         for note_id, payload in data.items():
             self._notes[note_id] = Note(

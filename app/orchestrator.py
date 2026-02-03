@@ -33,6 +33,21 @@ def decide_tool(message: str) -> OrchestrationDecision:
             return OrchestrationDecision(
                 tool="calendar.list_events", reason="calendar_list_keyword"
             )
+    if _mentions_notes(normalized):
+        if _mentions_create(normalized):
+            return OrchestrationDecision(tool="notes.create", reason="notes_create_keyword")
+    if _mentions_tasks(normalized):
+        if _mentions_create(normalized):
+            return OrchestrationDecision(tool="tasks.create", reason="tasks_create_keyword")
+        if _mentions_list(normalized):
+            return OrchestrationDecision(tool="tasks.list", reason="tasks_list_keyword")
+    if _mentions_spotify(normalized):
+        if _mentions_pause(normalized):
+            return OrchestrationDecision(tool="spotify.pause", reason="spotify_pause_keyword")
+        if _mentions_skip(normalized):
+            return OrchestrationDecision(tool="spotify.skip", reason="spotify_skip_keyword")
+        if _mentions_play(normalized):
+            return OrchestrationDecision(tool="spotify.play", reason="spotify_play_keyword")
     return OrchestrationDecision(tool=None, reason="no_tool_match")
 
 
@@ -70,3 +85,27 @@ def _mentions_create(text: str) -> bool:
 
 def _mentions_modify(text: str) -> bool:
     return any(keyword in text for keyword in ("alterar", "mudar", "remarcar", "editar"))
+
+
+def _mentions_notes(text: str) -> bool:
+    return any(keyword in text for keyword in ("nota", "notas", "anotação", "anotacoes"))
+
+
+def _mentions_tasks(text: str) -> bool:
+    return any(keyword in text for keyword in ("tarefa", "tarefas", "to-do", "todo"))
+
+
+def _mentions_spotify(text: str) -> bool:
+    return any(keyword in text for keyword in ("spotify", "música", "musica", "som"))
+
+
+def _mentions_play(text: str) -> bool:
+    return any(keyword in text for keyword in ("tocar", "play", "reproduzir", "iniciar"))
+
+
+def _mentions_pause(text: str) -> bool:
+    return any(keyword in text for keyword in ("pausar", "pause", "parar"))
+
+
+def _mentions_skip(text: str) -> bool:
+    return any(keyword in text for keyword in ("pular", "próxima", "proxima", "skip"))
