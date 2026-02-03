@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.gmail import draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
+from app.memory import configure_memory_store, confirm_memory, list_memory, propose_memory
 from app.notes import configure_notes_store
 from app.oauth import exchange_code, start_oauth
 from app.spotify import pause as spotify_pause
@@ -35,6 +36,11 @@ def configure_stores() -> None:
     )
     notes_path = Path(settings.notes_store_path) if settings.notes_store_path else None
     tasks_path = Path(settings.tasks_store_path) if settings.tasks_store_path else None
+    memory_path = Path(settings.memory_store_path) if settings.memory_store_path else None
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+    configure_tasks_store(tasks_path)
+    configure_memory_store(memory_path)
     configure_pending_actions(pending_path)
     configure_notes_store(notes_path)
     configure_tasks_store(tasks_path)
@@ -129,6 +135,21 @@ def spotify_skip_track(payload: dict[str, object]) -> dict[str, object]:
 @app.post("/chat")
 def chat(payload: dict[str, object]) -> dict[str, object]:
     return handle_chat(get_settings(), payload)
+
+
+@app.post("/memory/ask")
+def memory_ask(payload: dict[str, object]) -> dict[str, object]:
+    return propose_memory(payload)
+
+
+@app.post("/memory/confirm")
+def memory_confirm(payload: dict[str, object]) -> dict[str, object]:
+    return confirm_memory(payload)
+
+
+@app.get("/memory")
+def memory_list() -> dict[str, object]:
+    return list_memory()
 
 
 @app.post("/confirm")

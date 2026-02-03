@@ -12,6 +12,7 @@ from pathlib import Path
 
 from app import calendar, gmail, oauth, pending_actions
 from app.notes import configure_notes_store
+from app.memory import configure_memory_store
 from app.tasks import configure_tasks_store
 from app.config import get_settings
 from app.main import app
@@ -583,3 +584,16 @@ def test_spotify_requires_token() -> None:
     response = client.post("/tools/spotify/pause", json={})
     assert response.status_code == 500
     assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
+
+
+def test_memory_flow(tmp_path: Path) -> None:
+    configure_memory_store(tmp_path / "memory.json")
+    propose = client.post("/memory/ask", json={"key": "timezone", "value": "America/Sao_Paulo"})
+    assert propose.status_code == 200
+    memory_id = propose.json()["memory_id"]
+    confirm = client.post("/memory/confirm", json={"memory_id": memory_id, "confirmed": True})
+    assert confirm.status_code == 200
+    listing = client.get("/memory")
+    assert listing.status_code == 200
+    memories = listing.json()["data"]["memories"]
+    assert memories and memories[0]["key"] == "timezone"

@@ -19,6 +19,7 @@ class Settings:
     pending_actions_path: str | None
     notes_store_path: str | None
     tasks_store_path: str | None
+    memory_store_path: str | None
     spotify_access_token: str | None
     spotify_device_id: str | None
     spotify_base_url: str | None
@@ -53,6 +54,7 @@ def get_settings() -> Settings:
         pending_actions_path=os.getenv("PENDING_ACTIONS_PATH"),
         notes_store_path=os.getenv("NOTES_STORE_PATH"),
         tasks_store_path=os.getenv("TASKS_STORE_PATH"),
+        memory_store_path=os.getenv("MEMORY_STORE_PATH"),
         spotify_access_token=os.getenv("SPOTIFY_ACCESS_TOKEN"),
         spotify_device_id=os.getenv("SPOTIFY_DEVICE_ID"),
         spotify_base_url=os.getenv("SPOTIFY_BASE_URL"),
