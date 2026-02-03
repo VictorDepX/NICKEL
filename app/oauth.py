@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -21,13 +22,42 @@ class OAuthSession:
 
 
 class TokenStore:
-    def __init__(self, key: str) -> None:
+    def __init__(self, key: str, storage_path: Path | None) -> None:
         self._fernet = Fernet(key.encode("utf-8"))
         self._tokens: dict[str, bytes] = {}
+        self._storage_path = storage_path
+        self._load()
+
+    def _load(self) -> None:
+        if not self._storage_path or not self._storage_path.exists():
+            return
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            self._tokens = {
+                user_id: bytes.fromhex(value) for user_id, value in data.items()
+            }
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "code": "token_store_corrupt",
+                        "message": "Stored token cannot be loaded.",
+                    }
+                },
+            ) from exc
+
+    def _persist(self) -> None:
+        if not self._storage_path:
+            return
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = {user_id: token.hex() for user_id, token in self._tokens.items()}
+        self._storage_path.write_text(json.dumps(encoded), encoding="utf-8")
 
     def store(self, user_id: str, token: dict[str, Any]) -> None:
         encoded = json.dumps(token).encode("utf-8")
         self._tokens[user_id] = self._fernet.encrypt(encoded)
+        self._persist()
 
     def get(self, user_id: str) -> dict[str, Any] | None:
         encrypted = self._tokens.get(user_id)
@@ -115,7 +145,12 @@ def get_token_store(settings: Settings) -> TokenStore:
         )
     global _token_store
     if _token_store is None:
-        _token_store = TokenStore(settings.oauth_token_key)
+        storage_path = (
+            Path(settings.token_store_path)
+            if settings.token_store_path
+            else None
+        )
+        _token_store = TokenStore(settings.oauth_token_key, storage_path)
     return _token_store
 
 
@@ -173,6 +208,8 @@ def get_credentials(settings: Settings) -> Credentials:
         )
     expiry_value = token.get("expiry")
     expiry = datetime.fromisoformat(expiry_value) if expiry_value else None
+    if expiry and expiry.tzinfo is not None:
+        expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
     credentials = Credentials(
         token=token.get("access_token"),
         refresh_token=token.get("refresh_token"),

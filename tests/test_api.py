@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import json
 
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from pathlib import Path
+
 from app import calendar, gmail, oauth, pending_actions
+from app.notes import configure_notes_store
+from app.memory import configure_memory_store
+from app.tasks import configure_tasks_store
 from app.config import get_settings
 from app.main import app
 
@@ -470,8 +476,8 @@ def test_confirm_executes_action_stub() -> None:
     response = client.post("/tools/notes/create", json={"body": "Note"})
     action_id = response.json()["action_id"]
     confirm_response = client.post("/confirm", json={"action_id": action_id, "confirmed": True})
-    assert confirm_response.status_code == 501
-    assert confirm_response.json()["detail"]["error"]["code"] == "action_not_implemented"
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["data"]["note"]["body"] == "Note"
 
 
 def test_write_tool_does_not_execute_without_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -514,3 +520,80 @@ def test_responses_not_emotional_language() -> None:
     text = str(response.json()).lower()
     forbidden = ["sorry", "apolog", "regret", "feel", "hope", "happy"]
     assert all(word not in text for word in forbidden)
+
+
+def test_token_store_persists_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    token_path = tmp_path / "tokens.json"
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.setenv("TOKEN_STORE_PATH", str(token_path))
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": datetime(2030, 1, 1, tzinfo=timezone.utc).isoformat(),
+            "scopes": ["scope.a"],
+        },
+    )
+
+    oauth._token_store = None
+    token_store = oauth.get_token_store(get_settings())
+    token = token_store.get("default")
+    assert token is not None
+    assert token["access_token"] == "access"
+
+
+def test_pending_actions_persist_to_disk(tmp_path: Path) -> None:
+    path = tmp_path / "pending.json"
+    pending_actions.configure_pending_actions(path)
+    pending = pending_actions.require_confirmation("email.send", {"raw_base64": "aGVsbG8="})
+
+    pending_actions.configure_pending_actions(path)
+    action = pending_actions.confirm_action(pending["action_id"], True)
+    assert action.tool == "email.send"
+
+
+def test_tasks_create_and_list(tmp_path: Path) -> None:
+    configure_tasks_store(tmp_path / "tasks.json")
+    pending = client.post("/tools/tasks/create", json={"title": "Task"}).json()
+    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    assert response.status_code == 200
+    list_response = client.post("/tools/tasks/list", json={})
+    assert list_response.status_code == 200
+    tasks = list_response.json()["data"]["tasks"]
+    assert tasks and tasks[0]["title"] == "Task"
+
+
+def test_notes_persist_to_disk(tmp_path: Path) -> None:
+    path = tmp_path / "notes.json"
+    configure_notes_store(path)
+    pending = client.post("/tools/notes/create", json={"body": "Note body"}).json()
+    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    assert response.status_code == 200
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data
+
+
+def test_spotify_requires_token() -> None:
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
+
+
+def test_memory_flow(tmp_path: Path) -> None:
+    configure_memory_store(tmp_path / "memory.json")
+    propose = client.post("/memory/ask", json={"key": "timezone", "value": "America/Sao_Paulo"})
+    assert propose.status_code == 200
+    memory_id = propose.json()["memory_id"]
+    confirm = client.post("/memory/confirm", json={"memory_id": memory_id, "confirmed": True})
+    assert confirm.status_code == 200
+    listing = client.get("/memory")
+    assert listing.status_code == 200
+    memories = listing.json()["data"]["memories"]
+    assert memories and memories[0]["key"] == "timezone"
