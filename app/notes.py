@@ -48,6 +48,14 @@ class NotesStore:
                     }
                 },
             ) from exc
+        data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+        for note_id, payload in data.items():
+            self._notes[note_id] = Note(
+                note_id=payload["note_id"],
+                title=payload.get("title"),
+                body=payload["body"],
+                created_at=datetime.fromisoformat(payload["created_at"]),
+            )
 
     def _persist(self) -> None:
         if not self._storage_path:

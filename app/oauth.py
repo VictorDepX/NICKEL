@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,8 @@ class TokenStore:
                     }
                 },
             ) from exc
+        data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+        self._tokens = {user_id: bytes.fromhex(value) for user_id, value in data.items()}
 
     def _persist(self) -> None:
         if not self._storage_path:
