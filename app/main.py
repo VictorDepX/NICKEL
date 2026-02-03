@@ -41,6 +41,11 @@ def configure_stores() -> None:
     configure_notes_store(notes_path)
     configure_tasks_store(tasks_path)
     configure_memory_store(memory_path)
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+    configure_tasks_store(tasks_path)
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
 
 
 @app.get("/health")

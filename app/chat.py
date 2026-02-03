@@ -6,6 +6,8 @@ from fastapi import HTTPException
 
 from app.calendar import list_events as calendar_list
 from app.config import Settings
+from app.config import Settings
+from app.calendar import list_events as calendar_list
 from app.gmail import draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search

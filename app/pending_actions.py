@@ -48,6 +48,15 @@ class PendingActionStore:
                     }
                 },
             ) from exc
+        data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+        for action_id, payload in data.items():
+            self._pending[action_id] = PendingAction(
+                action_id=payload["action_id"],
+                tool=payload["tool"],
+                payload=payload["payload"],
+                created_at=datetime.fromisoformat(payload["created_at"]),
+                status=payload["status"],
+            )
 
     def _persist(self) -> None:
         if not self._storage_path:
