@@ -12,6 +12,7 @@ from pathlib import Path
 
 from app import calendar, gmail, oauth, pending_actions
 from app.notes import configure_notes_store
+from app.audit import configure_audit_store
 from app.memory import configure_memory_store
 from app.tasks import configure_tasks_store
 from app.config import get_settings
@@ -597,3 +598,30 @@ def test_memory_flow(tmp_path: Path) -> None:
     assert listing.status_code == 200
     memories = listing.json()["data"]["memories"]
     assert memories and memories[0]["key"] == "timezone"
+
+
+def test_audit_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_audit_store(tmp_path / "audit.json")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService([]))
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": ["scope.a"],
+        },
+    )
+
+    response = client.post("/tools/email/search", json={"query": "from:test"})
+    assert response.status_code == 200
+    listing = client.get("/audit")
+    assert listing.status_code == 200
+    events = listing.json()["data"]["events"]
+    assert events and events[-1]["tool"] == "email.search"

@@ -31,6 +31,7 @@ export PENDING_ACTIONS_PATH="./data/pending_actions.json"
 export NOTES_STORE_PATH="./data/notes.json"
 export TASKS_STORE_PATH="./data/tasks.json"
 export MEMORY_STORE_PATH="./data/memory.json"
+export AUDIT_STORE_PATH="./data/audit.json"
 export SPOTIFY_ACCESS_TOKEN="..."
 export SPOTIFY_DEVICE_ID="..."
 export SPOTIFY_BASE_URL="https://api.spotify.com/v1"
@@ -64,12 +65,17 @@ uvicorn app.main:app --reload
 ## Chat (LLM)
 
 - Envie mensagens para `/chat` com `{ "message": "..." }`.
+- Use a interface simples em `/ui`.
 
 ## Memória (opt-in)
 
 - Proponha memória em `/memory/ask` com `{ "key": "...", "value": "..." }`.
 - Confirme memória em `/memory/confirm` com `{ "memory_id": "...", "confirmed": true }`.
 - Liste memórias em `GET /memory`.
+
+## Auditoria
+
+- Liste eventos em `GET /audit`.
 
 ## Notes (write)
 
