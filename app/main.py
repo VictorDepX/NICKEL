@@ -48,6 +48,26 @@ def configure_stores() -> None:
     configure_audit_store(audit_path)
 
 
+@app.on_event("startup")
+def configure_stores() -> None:
+    settings = get_settings()
+    pending_path = (
+        Path(settings.pending_actions_path) if settings.pending_actions_path else None
+    )
+    notes_path = Path(settings.notes_store_path) if settings.notes_store_path else None
+    tasks_path = Path(settings.tasks_store_path) if settings.tasks_store_path else None
+    memory_path = Path(settings.memory_store_path) if settings.memory_store_path else None
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+    configure_tasks_store(tasks_path)
+    configure_memory_store(memory_path)
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+    configure_tasks_store(tasks_path)
+    configure_pending_actions(pending_path)
+    configure_notes_store(notes_path)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -125,6 +145,7 @@ def tasks_list(payload: dict[str, object]) -> dict[str, object]:
     result = list_tasks(get_settings(), payload)
     record_event("tasks.list", "ok", payload)
     return result
+    return list_tasks(get_settings(), payload)
 
 
 @app.post("/tools/spotify/play")
@@ -132,6 +153,7 @@ def spotify_play_track(payload: dict[str, object]) -> dict[str, object]:
     result = spotify_play(get_settings(), payload)
     record_event("spotify.play", "ok", payload)
     return result
+    return spotify_play(get_settings(), payload)
 
 
 @app.post("/tools/spotify/pause")
@@ -139,6 +161,7 @@ def spotify_pause_track(payload: dict[str, object]) -> dict[str, object]:
     result = spotify_pause(get_settings(), payload)
     record_event("spotify.pause", "ok", payload)
     return result
+    return spotify_pause(get_settings(), payload)
 
 
 @app.post("/tools/spotify/skip")
@@ -146,6 +169,7 @@ def spotify_skip_track(payload: dict[str, object]) -> dict[str, object]:
     result = spotify_skip(get_settings(), payload)
     record_event("spotify.skip", "ok", payload)
     return result
+    return spotify_skip(get_settings(), payload)
 
 
 @app.post("/chat")
@@ -188,6 +212,7 @@ def memory_list() -> dict[str, object]:
 @app.get("/audit")
 def audit_list(tool: str | None = None, since: str | None = None, limit: int | None = None) -> dict[str, object]:
     return list_audit_events({"tool": tool, "since": since, "limit": limit})
+    return list_memory()
 
 
 @app.post("/confirm")
