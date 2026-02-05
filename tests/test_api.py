@@ -118,6 +118,23 @@ class FakeCalendarWrite:
         return self._payload
 
 
+class SpyCalendarEvents:
+    def __init__(self) -> None:
+        self.list_kwargs: dict[str, object] | None = None
+
+    def list(self, **kwargs: object) -> FakeEventsList:
+        self.list_kwargs = kwargs
+        return FakeEventsList([{"id": "evt1"}])
+
+
+class SpyCalendarService:
+    def __init__(self) -> None:
+        self.events_resource = SpyCalendarEvents()
+
+    def events(self) -> SpyCalendarEvents:
+        return self.events_resource
+
+
 def test_calendar_list_events_returns_items(monkeypatch: pytest.MonkeyPatch) -> None:
     oauth._token_store = None
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
@@ -165,6 +182,44 @@ def test_calendar_list_events_expired_token(monkeypatch: pytest.MonkeyPatch) -> 
     response = client.post("/tools/calendar/list_events", json={"calendar_id": "primary"})
     assert response.status_code == 401
     assert response.json()["detail"]["error"]["code"] == "token_expired"
+
+
+def test_calendar_list_events_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    spy_service = SpyCalendarService()
+    monkeypatch.setattr(calendar, "build", lambda *_args, **_kwargs: spy_service)
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": ["scope.a"],
+        },
+    )
+
+    payload = {
+        "calendar_id": "primary",
+        "max_results": 5,
+        "time_min": "2024-01-01T00:00:00Z",
+        "time_max": "2024-01-31T23:59:59Z",
+    }
+    response = client.post("/tools/calendar/list_events", json=payload)
+    assert response.status_code == 200
+    assert spy_service.events_resource.list_kwargs == {
+        "calendarId": "primary",
+        "maxResults": 5,
+        "timeMin": "2024-01-01T00:00:00Z",
+        "timeMax": "2024-01-31T23:59:59Z",
+        "singleEvents": True,
+        "orderBy": "startTime",
+    }
 
 
 def test_calendar_create_event_after_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,6 +351,31 @@ class FakeGmailService:
         return FakeGmailUsers(self._messages)
 
 
+class SpyGmailMessages:
+    def __init__(self) -> None:
+        self.list_kwargs: dict[str, object] | None = None
+
+    def list(self, **kwargs: object) -> FakeGmailMessagesList:
+        self.list_kwargs = kwargs
+        return FakeGmailMessagesList([{"id": "msg1"}])
+
+
+class SpyGmailUsers:
+    def __init__(self) -> None:
+        self.messages_resource = SpyGmailMessages()
+
+    def messages(self) -> SpyGmailMessages:
+        return self.messages_resource
+
+
+class SpyGmailService:
+    def __init__(self) -> None:
+        self.users_resource = SpyGmailUsers()
+
+    def users(self) -> SpyGmailUsers:
+        return self.users_resource
+
+
 def test_email_search_returns_results(monkeypatch: pytest.MonkeyPatch) -> None:
     oauth._token_store = None
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
@@ -318,6 +398,38 @@ def test_email_search_returns_results(monkeypatch: pytest.MonkeyPatch) -> None:
     response = client.post("/tools/email/search", json={"query": "from:test"})
     assert response.status_code == 200
     assert response.json()["data"]["results"] == [{"id": "msg1"}]
+
+
+def test_email_search_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    spy_service = SpyGmailService()
+    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: spy_service)
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": ["scope.a"],
+        },
+    )
+
+    response = client.post(
+        "/tools/email/search",
+        json={"query": "subject:report", "max_results": 3, "user_id": "me"},
+    )
+    assert response.status_code == 200
+    assert spy_service.users_resource.messages_resource.list_kwargs == {
+        "userId": "me",
+        "q": "subject:report",
+        "maxResults": 3,
+    }
 
 
 def test_email_read_requires_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -585,6 +697,104 @@ def test_spotify_requires_token() -> None:
     response = client.post("/tools/spotify/pause", json={})
     assert response.status_code == 500
     assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
+
+
+def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        json: dict[str, object] | None = None,
+        timeout: int | float | None = None,
+    ) -> FakeResponse:
+        calls.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "params": params,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse()
+
+    monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("SPOTIFY_BASE_URL", "https://spotify.local")
+    monkeypatch.setenv("SPOTIFY_DEVICE_ID", "device123")
+    monkeypatch.setattr("app.spotify.httpx.request", fake_request)
+
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 200
+    assert calls
+    first_call = calls[0]
+    assert first_call["method"] == "PUT"
+    assert first_call["url"] == "https://spotify.local/me/player/pause"
+    assert first_call["headers"] == {"Authorization": "Bearer token"}
+    assert first_call["params"] == {"device_id": "device123"}
+    assert first_call["json"] is None
+
+
+def test_spotify_pause_discovers_phone_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object] | None = None) -> None:
+            self._payload = payload or {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        json: dict[str, object] | None = None,
+        timeout: int | float | None = None,
+    ) -> FakeResponse:
+        calls.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "params": params,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
+        if url.endswith("/me/player/devices"):
+            return FakeResponse(
+                {
+                    "devices": [
+                        {"id": "phone123", "is_active": True, "type": "Smartphone"}
+                    ]
+                }
+            )
+        return FakeResponse()
+
+    monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("SPOTIFY_BASE_URL", "https://spotify.local")
+    monkeypatch.setattr("app.spotify.httpx.request", fake_request)
+
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 200
+    assert len(calls) >= 2
+    assert calls[0]["url"] == "https://spotify.local/me/player/devices"
+    assert calls[1]["url"] == "https://spotify.local/me/player/pause"
+    assert calls[1]["params"] == {"device_id": "phone123"}
 
 
 def test_memory_flow(tmp_path: Path) -> None:
