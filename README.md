@@ -22,10 +22,10 @@ export GOOGLE_CLIENT_SECRET="..."
 export GOOGLE_REDIRECT_URI="http://localhost:8000/auth/google/callback"
 export GOOGLE_SCOPES="https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events"
 export OAUTH_TOKEN_KEY="cole_uma_chave_fernet"
-export LLM_BASE_URL="https://api.openai.com/v1"
-export LLM_API_KEY="..."
-export LLM_MODEL="gpt-4o-mini"
-export LLM_TIMEOUT_SECONDS="30"
+export LLM_BASE_URL="http://localhost:11434/v1"
+export LLM_API_KEY="ollama"
+export LLM_MODEL="qwen2.5:7b-instruct"
+export LLM_TIMEOUT_SECONDS="60"
 export TOKEN_STORE_PATH="./data/token_store.json"
 export PENDING_ACTIONS_PATH="./data/pending_actions.json"
 export NOTES_STORE_PATH="./data/notes.json"
@@ -36,6 +36,17 @@ export SPOTIFY_ACCESS_TOKEN="..."
 export SPOTIFY_DEVICE_ID="..."
 export SPOTIFY_BASE_URL="https://api.spotify.com/v1"
 ```
+
+
+## LLM local (Qwen via Ollama)
+
+```bash
+# Instale o Ollama: https://ollama.com/download
+ollama pull qwen2.5:7b-instruct
+ollama serve
+```
+
+Com o Ollama ativo, o NICKEL usa `LLM_BASE_URL=http://localhost:11434/v1` e o modelo `qwen2.5:7b-instruct`.
 
 ## Executar
 
@@ -64,8 +75,9 @@ uvicorn app.main:app --reload
 
 ## Chat (LLM)
 
-- Envie mensagens para `/chat` com `{ "message": "..." }`.
-- Use a interface simples em `/ui`.
+- Envie mensagens para `/chat` com `{ "message": "..." }` para conversa normal.
+- Para manter contexto entre turnos, envie também `history`, por exemplo `{ "message": "...", "history": [{"role":"user","content":"..."},{"role":"assistant","content":"..."}] }`.
+- Use a interface web em `/ui` (ela mantém o histórico automaticamente).
 
 ## Memória (opt-in)
 

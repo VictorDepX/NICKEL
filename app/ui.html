@@ -120,7 +120,7 @@
           <input
             id="message"
             type="text"
-            placeholder="Digite seu pedido..."
+            placeholder="Converse com o Nickel..."
             autocomplete="off"
             required
           />
@@ -139,6 +139,7 @@
       const input = document.getElementById("message");
       const button = document.getElementById("send-btn");
       const statusPill = document.getElementById("status-pill");
+      const conversation = [];
 
       const appendBubble = (text, role) => {
         const div = document.createElement("div");
@@ -152,11 +153,16 @@
         statusPill.textContent = `Status: ${text}`;
       };
 
+      const initial = "Olá! Pode conversar comigo normalmente. Eu também executo ações quando você pedir.";
+      appendBubble(initial, "assistant");
+      conversation.push({ role: "assistant", content: initial });
+
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const message = input.value.trim();
         if (!message) return;
         appendBubble(message, "user");
+        conversation.push({ role: "user", content: message });
         input.value = "";
         setStatus("enviando...");
         button.disabled = true;
@@ -164,11 +170,19 @@
           const response = await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message }),
+            body: JSON.stringify({
+              message,
+              history: conversation.slice(0, -1),
+            }),
           });
           const data = await response.json();
           const reply = data.response || JSON.stringify(data);
           appendBubble(reply, "assistant");
+          conversation.push({ role: "assistant", content: reply });
+          if (data.tool_result) {
+            appendBubble(`Resultado da ação:
+${JSON.stringify(data.tool_result, null, 2)}`, "assistant");
+          }
           if (data.status === "pending_confirmation") {
             appendBubble(
               `Ação pendente: ${data.pending_action?.tool} (${data.pending_action?.action_id})`,
