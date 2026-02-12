@@ -6,8 +6,6 @@ from fastapi import HTTPException
 
 from app.calendar import list_events as calendar_list
 from app.config import Settings
-from app.config import Settings
-from app.calendar import list_events as calendar_list
 from app.gmail import draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
@@ -18,6 +16,25 @@ from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
 from app.spotify import skip as spotify_skip
 from app.tasks import list_tasks
+
+
+def _parse_history(payload: dict[str, Any]) -> list[dict[str, str]]:
+    history = payload.get("history")
+    if not isinstance(history, list):
+        return []
+
+    parsed: list[dict[str, str]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"}:
+            continue
+        if not isinstance(content, str) or not content.strip():
+            continue
+        parsed.append({"role": role, "content": content.strip()})
+    return parsed
 
 
 def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
@@ -32,8 +49,15 @@ def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 }
             },
         )
+
+    history = _parse_history(payload)
     decision = decide_tool(message)
-    llm_response = generate_response(settings, message, forced_tool=decision.tool)
+    llm_response = generate_response(
+        settings,
+        message,
+        forced_tool=decision.tool,
+        history=history,
+    )
     action = llm_response.get("action")
     response_text = llm_response.get("response", "")
 

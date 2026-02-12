@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.config import Settings
 
 
 _SYSTEM_PROMPT_PATH = Path("docs/Nickel/system_prompt_text.md")
+_MAX_HISTORY_MESSAGES = 12
 
 
 def _load_system_prompt() -> str:
@@ -19,7 +21,29 @@ def _load_system_prompt() -> str:
     return "You are Nickel, an adult, pragmatic personal assistant."
 
 
-def _build_messages(user_message: str, forced_tool: str | None) -> list[dict[str, str]]:
+def _normalize_history(history: Any) -> list[dict[str, str]]:
+    if not isinstance(history, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for entry in history[-_MAX_HISTORY_MESSAGES:]:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        content = entry.get("content")
+        if role not in {"user", "assistant"}:
+            continue
+        if not isinstance(content, str) or not content.strip():
+            continue
+        normalized.append({"role": role, "content": content.strip()})
+    return normalized
+
+
+def _build_messages(
+    user_message: str,
+    forced_tool: str | None,
+    history: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
     system_prompt = _load_system_prompt()
     tool_instructions = (
         "Tools available:\n"
@@ -38,17 +62,22 @@ def _build_messages(user_message: str, forced_tool: str | None) -> list[dict[str
         "- spotify.skip (write): payload {}\n"
         "Return ONLY valid JSON with keys: response (string), action (object or null).\n"
         "If action is used, include tool and payload fields.\n"
-        "Do not include markdown or commentary outside JSON."
+        "If no tool is required, action must be null and provide a natural conversational response.\n"
+        "Do not include markdown or commentary outside JSON.\n"
+        "Do not wrap JSON in markdown fences."
     )
     if forced_tool:
         tool_instructions = (
             f"{tool_instructions}\nUse tool: {forced_tool}. "
             "Do not choose a different tool."
         )
-    return [
+
+    messages = [
         {"role": "system", "content": f"{system_prompt}\n\n{tool_instructions}"},
+        *_normalize_history(history),
         {"role": "user", "content": user_message},
     ]
+    return messages
 
 
 def _require_llm_settings(settings: Settings) -> tuple[str, str, str]:
@@ -86,13 +115,17 @@ def _require_llm_settings(settings: Settings) -> tuple[str, str, str]:
 
 
 def generate_response(
-    settings: Settings, message: str, forced_tool: str | None = None
+    settings: Settings,
+    message: str,
+    forced_tool: str | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     base_url, api_key, model = _require_llm_settings(settings)
     payload = {
         "model": model,
-        "messages": _build_messages(message, forced_tool),
+        "messages": _build_messages(message, forced_tool, history=history),
         "temperature": 0.2,
+        "response_format": {"type": "json_object"},
     }
     try:
         response = httpx.post(
@@ -116,7 +149,7 @@ def generate_response(
     try:
         data = response.json()
         content = data["choices"][0]["message"]["content"]
-        decoded = json.loads(content)
+        decoded = _decode_llm_json(content)
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
         raise HTTPException(
             status_code=502,
@@ -127,4 +160,32 @@ def generate_response(
                 }
             },
         ) from exc
+    return decoded
+
+
+def _decode_llm_json(content: Any) -> dict[str, Any]:
+    if isinstance(content, list):
+        text = "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    else:
+        text = str(content)
+    text = text.strip()
+
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", text)
+        if fenced_match:
+            decoded = json.loads(fenced_match.group(1))
+        else:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start < 0 or end < 0 or start >= end:
+                raise
+            decoded = json.loads(text[start : end + 1])
+
+    if not isinstance(decoded, dict):
+        raise json.JSONDecodeError("LLM response was not a JSON object.", text, 0)
     return decoded
