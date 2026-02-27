@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import HTTPException
 
+from app.audit import record_llm_event
 from app.config import Settings
 
 
@@ -114,6 +116,18 @@ def _require_llm_settings(settings: Settings) -> tuple[str, str, str]:
     return settings.llm_base_url, settings.llm_api_key, settings.llm_model
 
 
+def _summarize_error(exc: Exception) -> str:
+    message = str(exc).replace("\n", " ").strip()
+    if len(message) > 180:
+        return f"{message[:177]}..."
+    return message or exc.__class__.__name__
+
+
+def _should_retry_http_error(exc: httpx.HTTPStatusError) -> bool:
+    status_code = exc.response.status_code
+    return status_code == 429 or status_code >= 500
+
+
 def generate_response(
     settings: Settings,
     message: str,
@@ -124,18 +138,74 @@ def generate_response(
     payload = {
         "model": model,
         "messages": _build_messages(message, forced_tool, history=history),
-        "temperature": 0.2,
+        "temperature": settings.llm_temperature,
+        "max_tokens": settings.llm_max_tokens,
         "response_format": {"type": "json_object"},
     }
-    try:
-        response = httpx.post(
-            f"{base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
-            timeout=settings.llm_timeout_seconds,
+    retry_count = max(0, settings.llm_retry_count)
+    backoff_ms = max(0, settings.llm_retry_backoff_ms)
+
+    start_time = time.perf_counter()
+    response: httpx.Response | None = None
+
+    for attempt in range(retry_count + 1):
+        try:
+            response = httpx.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=settings.llm_timeout_seconds,
+            )
+            response.raise_for_status()
+            break
+        except httpx.HTTPStatusError as exc:
+            if attempt < retry_count and _should_retry_http_error(exc):
+                sleep_ms = backoff_ms * (2**attempt)
+                if sleep_ms > 0:
+                    time.sleep(sleep_ms / 1000)
+                continue
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            record_llm_event(
+                model=model,
+                duration_ms=duration_ms,
+                status="error",
+                error_summary=f"HTTP {exc.response.status_code}: {_summarize_error(exc)}",
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": {
+                        "code": "llm_request_failed",
+                        "message": "Failed to call LLM.",
+                    }
+                },
+            ) from exc
+        except httpx.HTTPError as exc:
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            record_llm_event(
+                model=model,
+                duration_ms=duration_ms,
+                status="error",
+                error_summary=_summarize_error(exc),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": {
+                        "code": "llm_request_failed",
+                        "message": "Failed to call LLM.",
+                    }
+                },
+            ) from exc
+
+    if response is None:
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        record_llm_event(
+            model=model,
+            duration_ms=duration_ms,
+            status="error",
+            error_summary="LLM response was empty.",
         )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=502,
             detail={
@@ -144,13 +214,20 @@ def generate_response(
                     "message": "Failed to call LLM.",
                 }
             },
-        ) from exc
+        )
 
     try:
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         decoded = _decode_llm_json(content)
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        record_llm_event(
+            model=model,
+            duration_ms=duration_ms,
+            status="error",
+            error_summary=_summarize_error(exc),
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -160,6 +237,9 @@ def generate_response(
                 }
             },
         ) from exc
+
+    duration_ms = int((time.perf_counter() - start_time) * 1000)
+    record_llm_event(model=model, duration_ms=duration_ms, status="ok")
     return decoded
 
 

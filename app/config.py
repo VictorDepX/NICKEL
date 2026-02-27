@@ -15,6 +15,10 @@ class Settings:
     llm_api_key: str | None
     llm_model: str | None
     llm_timeout_seconds: float
+    llm_max_tokens: int
+    llm_temperature: float
+    llm_retry_count: int
+    llm_retry_backoff_ms: int
     token_store_path: str | None
     pending_actions_path: str | None
     notes_store_path: str | None
@@ -51,6 +55,10 @@ def get_settings() -> Settings:
         llm_api_key=os.getenv("LLM_API_KEY"),
         llm_model=os.getenv("LLM_MODEL"),
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
+        llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "512")),
+        llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
+        llm_retry_count=int(os.getenv("LLM_RETRY_COUNT", "2")),
+        llm_retry_backoff_ms=int(os.getenv("LLM_RETRY_BACKOFF_MS", "250")),
         token_store_path=os.getenv("TOKEN_STORE_PATH"),
         pending_actions_path=os.getenv("PENDING_ACTIONS_PATH"),
         notes_store_path=os.getenv("NOTES_STORE_PATH"),
