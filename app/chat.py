@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
-from app.audit import record_event
 
+from app.audit import record_event
 from app.calendar import list_events as calendar_list
 from app.config import Settings
 from app.gmail import draft as email_draft
@@ -25,6 +25,8 @@ _CONFIRMATION_REQUIRED_TOOLS = {
     "calendar.modify_event",
     "notes.create",
     "tasks.create",
+}
+
 TOOL_HANDLERS: dict[str, dict[str, Any]] = {
     "email.search": {"handler": email_search, "requires_confirmation": False},
     "email.read": {"handler": email_read, "requires_confirmation": False},
@@ -91,28 +93,20 @@ def _compute_confidence(requested_tool: str | None, action_tool: str | None) -> 
 
 def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
     message = _require_message(payload)
-
     history = _parse_history(payload)
+
     decision = decide_tool(message)
     forced_tool = decision.tool if is_high_confidence(decision) else None
+
     llm_response = generate_response(
         settings,
         message,
         forced_tool=forced_tool,
         history=history,
     )
+
     action = llm_response.get("action")
     action_tool = action.get("tool") if isinstance(action, dict) else None
-    if decision.tool and action_tool != decision.tool:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": {
-                    "code": "llm_tool_mismatch",
-                    "message": "LLM returned a tool different from orchestrator decision.",
-                }
-            },
-        )
     response_text = llm_response.get("response", "")
 
     if action:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from pathlib import Path
 
 from app.actions import execute_action
 from app.audit import configure_audit_store, list_events as list_audit_events, record_event
@@ -18,7 +18,6 @@ from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
 from app.spotify import skip as spotify_skip
 from app.tasks import configure_tasks_store, list_tasks
-from pathlib import Path
 
 from app.pending_actions import (
     cancel_action,
@@ -28,7 +27,6 @@ from app.pending_actions import (
 )
 
 app = FastAPI(title="Nickel API", version="0.1.0")
-_UI_PATH = Path("app/ui.html")
 
 
 @app.on_event("startup")
@@ -162,20 +160,6 @@ def chat_plan(payload: dict[str, object]) -> dict[str, object]:
 def chat_execute(payload: dict[str, object]) -> dict[str, object]:
     return execute_chat_plan(get_settings(), payload)
 
-
-@app.get("/ui", response_class=HTMLResponse)
-def ui() -> HTMLResponse:
-    if not _UI_PATH.exists():
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": {
-                    "code": "ui_not_found",
-                    "message": "UI template not found.",
-                }
-            },
-        )
-    return HTMLResponse(_UI_PATH.read_text(encoding="utf-8"))
 
 
 @app.post("/memory/ask")
