@@ -18,6 +18,26 @@ from app.spotify import skip as spotify_skip
 from app.tasks import list_tasks
 
 
+TOOL_HANDLERS: dict[str, dict[str, Any]] = {
+    "email.search": {"handler": email_search, "requires_confirmation": False},
+    "email.read": {"handler": email_read, "requires_confirmation": False},
+    "email.draft": {"handler": email_draft, "requires_confirmation": False},
+    "email.send": {"handler": None, "requires_confirmation": True},
+    "calendar.list_events": {
+        "handler": calendar_list,
+        "requires_confirmation": False,
+    },
+    "calendar.create_event": {"handler": None, "requires_confirmation": True},
+    "calendar.modify_event": {"handler": None, "requires_confirmation": True},
+    "notes.create": {"handler": None, "requires_confirmation": True},
+    "tasks.create": {"handler": None, "requires_confirmation": True},
+    "tasks.list": {"handler": list_tasks, "requires_confirmation": False},
+    "spotify.play": {"handler": spotify_play, "requires_confirmation": False},
+    "spotify.pause": {"handler": spotify_pause, "requires_confirmation": False},
+    "spotify.skip": {"handler": spotify_skip, "requires_confirmation": False},
+}
+
+
 def _parse_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     history = payload.get("history")
     if not isinstance(history, list):
@@ -74,106 +94,32 @@ def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 },
             )
         action_payload = action.get("payload", {})
-        if tool == "email.search":
-            tool_result = email_search(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "email.read":
-            tool_result = email_read(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "email.draft":
-            tool_result = email_draft(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "email.send":
-            pending = require_confirmation("email.send", action_payload)
+        tool_config = TOOL_HANDLERS.get(tool)
+        if tool_config is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "unsupported_tool",
+                        "message": f"Tool {tool} is not supported.",
+                    }
+                },
+            )
+
+        if tool_config["requires_confirmation"]:
+            pending = require_confirmation(tool, action_payload)
             return {
                 "status": "pending_confirmation",
                 "response": response_text,
                 "pending_action": pending,
             }
-        if tool == "calendar.list_events":
-            tool_result = calendar_list(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "calendar.create_event":
-            pending = require_confirmation("calendar.create_event", action_payload)
-            return {
-                "status": "pending_confirmation",
-                "response": response_text,
-                "pending_action": pending,
-            }
-        if tool == "calendar.modify_event":
-            pending = require_confirmation("calendar.modify_event", action_payload)
-            return {
-                "status": "pending_confirmation",
-                "response": response_text,
-                "pending_action": pending,
-            }
-        if tool == "notes.create":
-            pending = require_confirmation("notes.create", action_payload)
-            return {
-                "status": "pending_confirmation",
-                "response": response_text,
-                "pending_action": pending,
-            }
-        if tool == "tasks.create":
-            pending = require_confirmation("tasks.create", action_payload)
-            return {
-                "status": "pending_confirmation",
-                "response": response_text,
-                "pending_action": pending,
-            }
-        if tool == "tasks.list":
-            tool_result = list_tasks(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "spotify.play":
-            tool_result = spotify_play(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "spotify.pause":
-            tool_result = spotify_pause(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        if tool == "spotify.skip":
-            tool_result = spotify_skip(settings, action_payload)
-            return {
-                "status": "ok",
-                "response": response_text,
-                "tool_result": tool_result,
-            }
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "unsupported_tool",
-                    "message": f"Tool {tool} is not supported.",
-                }
-            },
-        )
+
+        tool_result = tool_config["handler"](settings, action_payload)
+        return {
+            "status": "ok",
+            "response": response_text,
+            "tool_result": tool_result,
+        }
 
     return {
         "status": "ok",
