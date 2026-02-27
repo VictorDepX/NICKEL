@@ -118,6 +118,22 @@ def record_event(
     audit_store.add(tool=tool, status=status, payload=payload, action_id=action_id)
 
 
+def record_llm_event(
+    *,
+    model: str,
+    duration_ms: int,
+    status: str,
+    error_summary: str | None = None,
+) -> None:
+    safe_payload = {
+        "model": model,
+        "duration_ms": duration_ms,
+        "status": status,
+        "error_summary": error_summary,
+    }
+    audit_store.add(tool="llm.chat.completions", status=status, payload=safe_payload)
+
+
 def list_events(params: dict[str, Any]) -> dict[str, Any]:
     tool = params.get("tool")
     since_value = params.get("since")
