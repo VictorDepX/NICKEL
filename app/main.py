@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from app.actions import execute_action
 from app.audit import configure_audit_store, list_events as list_audit_events, record_event
 from app.calendar import list_events
-from app.chat import handle_chat
+from app.chat import execute_chat_plan, handle_chat, plan_chat
 from app.config import get_settings
 from app.gmail import draft as email_draft
 from app.gmail import read as email_read
@@ -151,6 +151,16 @@ def spotify_skip_track(payload: dict[str, object]) -> dict[str, object]:
 @app.post("/chat")
 def chat(payload: dict[str, object]) -> dict[str, object]:
     return handle_chat(get_settings(), payload)
+
+
+@app.post("/chat/plan")
+def chat_plan(payload: dict[str, object]) -> dict[str, object]:
+    return plan_chat(get_settings(), payload)
+
+
+@app.post("/chat/execute")
+def chat_execute(payload: dict[str, object]) -> dict[str, object]:
+    return execute_chat_plan(get_settings(), payload)
 
 
 @app.get("/ui", response_class=HTMLResponse)
