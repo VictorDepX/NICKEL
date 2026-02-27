@@ -16,6 +16,7 @@ from app.audit import configure_audit_store
 from app.memory import configure_memory_store
 from app.tasks import configure_tasks_store
 from app.config import get_settings
+import app.main as main_module
 from app.main import app
 
 
@@ -681,6 +682,63 @@ def test_tasks_create_and_list(tmp_path: Path) -> None:
     assert list_response.status_code == 200
     tasks = list_response.json()["data"]["tasks"]
     assert tasks and tasks[0]["title"] == "Task"
+
+
+def test_configure_stores_configures_each_store_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: dict[str, int] = {
+        "pending": 0,
+        "notes": 0,
+        "tasks": 0,
+        "memory": 0,
+        "audit": 0,
+    }
+
+    monkeypatch.setattr(main_module, "configure_pending_actions", lambda _path: calls.__setitem__("pending", calls["pending"] + 1))
+    monkeypatch.setattr(main_module, "configure_notes_store", lambda _path: calls.__setitem__("notes", calls["notes"] + 1))
+    monkeypatch.setattr(main_module, "configure_tasks_store", lambda _path: calls.__setitem__("tasks", calls["tasks"] + 1))
+    monkeypatch.setattr(main_module, "configure_memory_store", lambda _path: calls.__setitem__("memory", calls["memory"] + 1))
+    monkeypatch.setattr(main_module, "configure_audit_store", lambda _path: calls.__setitem__("audit", calls["audit"] + 1))
+
+    main_module.configure_stores()
+    assert calls == {"pending": 1, "notes": 1, "tasks": 1, "memory": 1, "audit": 1}
+
+
+def test_routes_call_underlying_handlers_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"tasks": 0, "play": 0, "pause": 0, "skip": 0, "audit": 0}
+
+    def fake_list_tasks(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+        calls["tasks"] += 1
+        return {"status": "ok", "data": {"tasks": []}}
+
+    def fake_spotify_play(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+        calls["play"] += 1
+        return {"status": "ok", "data": {}}
+
+    def fake_spotify_pause(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+        calls["pause"] += 1
+        return {"status": "ok", "data": {}}
+
+    def fake_spotify_skip(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+        calls["skip"] += 1
+        return {"status": "ok", "data": {}}
+
+    def fake_list_audit_events(_filters: dict[str, object]) -> dict[str, object]:
+        calls["audit"] += 1
+        return {"status": "ok", "data": {"events": []}}
+
+    monkeypatch.setattr(main_module, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module, "spotify_play", fake_spotify_play)
+    monkeypatch.setattr(main_module, "spotify_pause", fake_spotify_pause)
+    monkeypatch.setattr(main_module, "spotify_skip", fake_spotify_skip)
+    monkeypatch.setattr(main_module, "list_audit_events", fake_list_audit_events)
+
+    assert client.post("/tools/tasks/list", json={}).status_code == 200
+    assert client.post("/tools/spotify/play", json={}).status_code == 200
+    assert client.post("/tools/spotify/pause", json={}).status_code == 200
+    assert client.post("/tools/spotify/skip", json={}).status_code == 200
+    assert client.get("/audit").status_code == 200
+
+    assert calls == {"tasks": 1, "play": 1, "pause": 1, "skip": 1, "audit": 1}
 
 
 def test_notes_persist_to_disk(tmp_path: Path) -> None:

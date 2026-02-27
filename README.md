@@ -22,9 +22,9 @@ export GOOGLE_CLIENT_SECRET="..."
 export GOOGLE_REDIRECT_URI="http://localhost:8000/auth/google/callback"
 export GOOGLE_SCOPES="https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events"
 export OAUTH_TOKEN_KEY="cole_uma_chave_fernet"
-export LLM_BASE_URL="http://localhost:11434/v1"
-export LLM_API_KEY="ollama"
-export LLM_MODEL="qwen2.5:7b-instruct"
+export LLM_BASE_URL="https://api.groq.com/openai/v1"
+export LLM_API_KEY="gsk_..."
+export LLM_MODEL="llama-3.1-8b-instant"
 export LLM_TIMEOUT_SECONDS="60"
 export TOKEN_STORE_PATH="./data/token_store.json"
 export PENDING_ACTIONS_PATH="./data/pending_actions.json"
@@ -38,15 +38,17 @@ export SPOTIFY_BASE_URL="https://api.spotify.com/v1"
 ```
 
 
-## LLM local (Qwen via Ollama)
+## LLM via GroqCloud (sem hospedagem local)
+
+Crie uma API key no GroqCloud e configure:
 
 ```bash
-# Instale o Ollama: https://ollama.com/download
-ollama pull qwen2.5:7b-instruct
-ollama serve
+export LLM_BASE_URL="https://api.groq.com/openai/v1"
+export LLM_API_KEY="gsk_..."
+export LLM_MODEL="llama-3.1-8b-instant"
 ```
 
-Com o Ollama ativo, o NICKEL usa `LLM_BASE_URL=http://localhost:11434/v1` e o modelo `qwen2.5:7b-instruct`.
+Com essa configuração o NICKEL consome a API do GroqCloud, sem necessidade de rodar modelo local.
 
 ## Executar
 
@@ -75,8 +77,12 @@ uvicorn app.main:app --reload
 
 ## Chat (LLM)
 
-- Envie mensagens para `/chat` com `{ "message": "..." }` para conversa normal.
+- Compatibilidade: continue usando `POST /chat` com `{ "message": "..." }`.
+- Novo planejamento: `POST /chat/plan` retorna plano estruturado com `response`, `action`, `confidence`, `requires_confirmation` e **não executa tool**.
+- Nova execução: `POST /chat/execute` executa uma ação já planejada (ou responde normalmente quando `action` é `null`).
+- Fluxo unificado: internamente, `/chat` usa `plan -> execute`.
 - Para manter contexto entre turnos, envie também `history`, por exemplo `{ "message": "...", "history": [{"role":"user","content":"..."},{"role":"assistant","content":"..."}] }`.
+- Benefícios do split plan/execute: depuração mais simples, UI mais previsível e menor acoplamento com o provider de LLM.
 - Use a interface web em `/ui` (ela mantém o histórico automaticamente).
 
 ## Memória (opt-in)
