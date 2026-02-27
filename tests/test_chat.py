@@ -82,6 +82,53 @@ def test_handle_chat_ignores_invalid_history_entries(monkeypatch) -> None:
     assert captured["history"] == [{"role": "assistant", "content": "Olá"}]
 
 
+def test_handle_chat_does_not_force_tool_when_low_confidence(monkeypatch) -> None:
+    captured = {}
+
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        captured["forced_tool"] = forced_tool
+        return {"response": "ok", "action": None}
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+
+    handle_chat(
+        _settings(),
+        {"message": "quero ver agenda e mandar email"},
+    )
+
+    assert captured["forced_tool"] is None
+
+
+def test_handle_chat_fallbacks_on_high_confidence_mismatch(monkeypatch) -> None:
+    captured = {}
+
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        captured["forced_tool"] = forced_tool
+        return {
+            "response": "vou enviar",
+            "action": {"tool": "email.send", "payload": {}},
+        }
+
+    def fake_record_event(tool, status, payload, action_id=None):
+        captured["audit"] = {
+            "tool": tool,
+            "status": status,
+            "payload": payload,
+            "action_id": action_id,
+        }
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr("app.chat.record_event", fake_record_event)
+
+    result = handle_chat(
+        _settings(),
+        {"message": "pausar música"},
+    )
+
+    assert captured["forced_tool"] == "spotify.pause"
+    assert result["status"] == "requires_clarification"
+    assert result["fallback"] == "tool_mismatch"
+    assert captured["audit"]["tool"] == "orchestrator.mismatch"
 def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
     def fake_generate_response(settings, message, forced_tool=None, history=None):
         return {
