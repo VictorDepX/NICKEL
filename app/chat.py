@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
+from app.audit import record_event
 
 from app.calendar import list_events as calendar_list
 from app.config import Settings
@@ -10,7 +11,7 @@ from app.gmail import draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
 from app.llm import generate_response
-from app.orchestrator import decide_tool
+from app.orchestrator import decide_tool, is_high_confidence
 from app.pending_actions import require_confirmation
 from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
@@ -52,10 +53,11 @@ def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
     history = _parse_history(payload)
     decision = decide_tool(message)
+    forced_tool = decision.tool if is_high_confidence(decision) else None
     llm_response = generate_response(
         settings,
         message,
-        forced_tool=decision.tool,
+        forced_tool=forced_tool,
         history=history,
     )
     action = llm_response.get("action")
@@ -63,16 +65,45 @@ def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
     if action:
         tool = action.get("tool")
-        if decision.tool and tool != decision.tool:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "error": {
-                        "code": "llm_tool_mismatch",
-                        "message": "LLM returned a tool different from orchestrator decision.",
-                    }
+        if forced_tool and tool != forced_tool:
+            record_event(
+                tool="orchestrator.mismatch",
+                status="fallback",
+                payload={
+                    "message": message,
+                    "decision_tool": decision.tool,
+                    "decision_reason": decision.reason,
+                    "decision_confidence": decision.confidence,
+                    "forced_tool": forced_tool,
+                    "llm_tool": tool,
                 },
             )
+            return {
+                "status": "requires_clarification",
+                "response": "Encontrei um conflito na interpretação do pedido. Pode confirmar a ação desejada?",
+                "fallback": "tool_mismatch",
+                "orchestration": {
+                    "decision": {
+                        "tool": decision.tool,
+                        "reason": decision.reason,
+                        "confidence": decision.confidence,
+                    },
+                    "llm_tool": tool,
+                },
+            }
+
+        if decision.tool is None and tool:
+            record_event(
+                tool="orchestrator.low_confidence_action",
+                status="observed",
+                payload={
+                    "message": message,
+                    "decision_reason": decision.reason,
+                    "decision_confidence": decision.confidence,
+                    "llm_tool": tool,
+                },
+            )
+
         action_payload = action.get("payload", {})
         if tool == "email.search":
             tool_result = email_search(settings, action_payload)
