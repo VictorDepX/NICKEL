@@ -7,48 +7,65 @@ from dataclasses import dataclass
 class OrchestrationDecision:
     tool: str | None
     reason: str
+    confidence: float
+
+
+_HIGH_CONFIDENCE_THRESHOLD = 0.75
+
+
+def is_high_confidence(decision: OrchestrationDecision) -> bool:
+    return decision.confidence >= _HIGH_CONFIDENCE_THRESHOLD
 
 
 def decide_tool(message: str) -> OrchestrationDecision:
     normalized = message.lower()
+    matched_tools: list[tuple[str, str, float]] = []
+
     if _mentions_email(normalized):
         if _mentions_send(normalized):
-            return OrchestrationDecision(tool="email.send", reason="email_send_keyword")
+            matched_tools.append(("email.send", "email_send_keyword", 0.85))
         if _mentions_draft(normalized):
-            return OrchestrationDecision(tool="email.draft", reason="email_draft_keyword")
+            matched_tools.append(("email.draft", "email_draft_keyword", 0.85))
         if _mentions_read(normalized):
-            return OrchestrationDecision(tool="email.read", reason="email_read_keyword")
+            matched_tools.append(("email.read", "email_read_keyword", 0.8))
         if _mentions_search(normalized):
-            return OrchestrationDecision(tool="email.search", reason="email_search_keyword")
+            matched_tools.append(("email.search", "email_search_keyword", 0.8))
     if _mentions_calendar(normalized):
         if _mentions_modify(normalized):
-            return OrchestrationDecision(
-                tool="calendar.modify_event", reason="calendar_modify_keyword"
-            )
+            matched_tools.append(("calendar.modify_event", "calendar_modify_keyword", 0.85))
         if _mentions_create(normalized):
-            return OrchestrationDecision(
-                tool="calendar.create_event", reason="calendar_create_keyword"
-            )
+            matched_tools.append(("calendar.create_event", "calendar_create_keyword", 0.85))
         if _mentions_list(normalized):
-            return OrchestrationDecision(
-                tool="calendar.list_events", reason="calendar_list_keyword"
-            )
+            matched_tools.append(("calendar.list_events", "calendar_list_keyword", 0.8))
     if _mentions_notes(normalized):
         if _mentions_create(normalized):
-            return OrchestrationDecision(tool="notes.create", reason="notes_create_keyword")
+            matched_tools.append(("notes.create", "notes_create_keyword", 0.8))
     if _mentions_tasks(normalized):
         if _mentions_create(normalized):
-            return OrchestrationDecision(tool="tasks.create", reason="tasks_create_keyword")
+            matched_tools.append(("tasks.create", "tasks_create_keyword", 0.8))
         if _mentions_list(normalized):
-            return OrchestrationDecision(tool="tasks.list", reason="tasks_list_keyword")
+            matched_tools.append(("tasks.list", "tasks_list_keyword", 0.75))
     if _mentions_spotify(normalized):
         if _mentions_pause(normalized):
-            return OrchestrationDecision(tool="spotify.pause", reason="spotify_pause_keyword")
+            matched_tools.append(("spotify.pause", "spotify_pause_keyword", 0.85))
         if _mentions_skip(normalized):
-            return OrchestrationDecision(tool="spotify.skip", reason="spotify_skip_keyword")
+            matched_tools.append(("spotify.skip", "spotify_skip_keyword", 0.85))
         if _mentions_play(normalized):
-            return OrchestrationDecision(tool="spotify.play", reason="spotify_play_keyword")
-    return OrchestrationDecision(tool=None, reason="no_tool_match")
+            matched_tools.append(("spotify.play", "spotify_play_keyword", 0.85))
+
+    if not matched_tools:
+        return OrchestrationDecision(tool=None, reason="no_tool_match", confidence=0.0)
+
+    if len(matched_tools) > 1:
+        tools = ",".join(tool for tool, _, _ in matched_tools)
+        return OrchestrationDecision(
+            tool=None,
+            reason=f"ambiguous_tool_match:{tools}",
+            confidence=0.45,
+        )
+
+    tool, reason, confidence = matched_tools[0]
+    return OrchestrationDecision(tool=tool, reason=reason, confidence=confidence)
 
 
 def _mentions_email(text: str) -> bool:

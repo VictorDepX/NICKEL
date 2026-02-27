@@ -11,9 +11,9 @@ def _settings() -> Settings:
         google_redirect_uri=None,
         google_scopes=(),
         oauth_token_key=None,
-        llm_base_url="http://localhost:11434/v1",
-        llm_api_key="ollama",
-        llm_model="qwen2.5:7b-instruct",
+        llm_base_url="https://api.groq.com/openai/v1",
+        llm_api_key="groq-test-key",
+        llm_model="llama-3.1-8b-instant",
         llm_timeout_seconds=30.0,
         token_store_path=None,
         pending_actions_path=None,
@@ -80,3 +80,131 @@ def test_handle_chat_ignores_invalid_history_entries(monkeypatch) -> None:
     )
 
     assert captured["history"] == [{"role": "assistant", "content": "Olá"}]
+
+
+def test_handle_chat_does_not_force_tool_when_low_confidence(monkeypatch) -> None:
+    captured = {}
+
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        captured["forced_tool"] = forced_tool
+        return {"response": "ok", "action": None}
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+
+    handle_chat(
+        _settings(),
+        {"message": "quero ver agenda e mandar email"},
+    )
+
+    assert captured["forced_tool"] is None
+
+
+def test_handle_chat_fallbacks_on_high_confidence_mismatch(monkeypatch) -> None:
+    captured = {}
+
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        captured["forced_tool"] = forced_tool
+        return {
+            "response": "vou enviar",
+            "action": {"tool": "email.send", "payload": {}},
+        }
+
+    def fake_record_event(tool, status, payload, action_id=None):
+        captured["audit"] = {
+            "tool": tool,
+            "status": status,
+            "payload": payload,
+            "action_id": action_id,
+        }
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr("app.chat.record_event", fake_record_event)
+
+    result = handle_chat(
+        _settings(),
+        {"message": "pausar música"},
+    )
+
+    assert captured["forced_tool"] == "spotify.pause"
+    assert result["status"] == "requires_clarification"
+    assert result["fallback"] == "tool_mismatch"
+    assert captured["audit"]["tool"] == "orchestrator.mismatch"
+def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Li seus e-mails",
+            "action": {"tool": "email.read", "payload": {"id": "abc"}},
+        }
+
+    def fake_email_read(settings, payload):
+        assert payload == {"id": "abc"}
+        return {"id": "abc", "subject": "Olá"}
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr("app.chat.email_read", fake_email_read)
+    monkeypatch.setitem(
+        __import__("app.chat", fromlist=["TOOL_HANDLERS"]).TOOL_HANDLERS,
+        "email.read",
+        {"handler": fake_email_read, "requires_confirmation": False},
+    )
+
+    result = handle_chat(_settings(), {"message": "ler email"})
+
+    assert result == {
+        "status": "ok",
+        "response": "Li seus e-mails",
+        "tool_result": {"id": "abc", "subject": "Olá"},
+    }
+
+
+def test_handle_chat_routes_supported_confirmation_tool(monkeypatch) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Posso enviar",
+            "action": {"tool": "email.send", "payload": {"to": "a@b.com"}},
+        }
+
+    def fake_require_confirmation(tool, payload):
+        assert tool == "email.send"
+        assert payload == {"to": "a@b.com"}
+        return {"action_id": "pending-1", "tool": tool, "payload": payload}
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr("app.chat.require_confirmation", fake_require_confirmation)
+
+    result = handle_chat(_settings(), {"message": "enviar email"})
+
+    assert result == {
+        "status": "pending_confirmation",
+        "response": "Posso enviar",
+        "pending_action": {
+            "action_id": "pending-1",
+            "tool": "email.send",
+            "payload": {"to": "a@b.com"},
+        },
+    }
+
+
+def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Não consegui",
+            "action": {"tool": "invalid.tool", "payload": {}},
+        }
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+
+    try:
+        handle_chat(_settings(), {"message": "fazer algo"})
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == {
+            "error": {
+                "code": "unsupported_tool",
+                "message": "Tool invalid.tool is not supported.",
+            }
+        }
+    else:
+        raise AssertionError("Expected HTTPException for unsupported tool")

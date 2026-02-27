@@ -13,6 +13,229 @@ from app.config import Settings
 
 _SYSTEM_PROMPT_PATH = Path("docs/Nickel/system_prompt_text.md")
 _MAX_HISTORY_MESSAGES = 12
+_RESPONSE_SCHEMA: dict[str, Any] = {
+    "name": "nickel_response",
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["response", "action"],
+        "properties": {
+            "response": {"type": "string"},
+            "action": {
+                "type": ["object", "null"],
+                "additionalProperties": False,
+                "required": ["tool", "payload"],
+                "properties": {
+                    "tool": {"type": "string"},
+                    "payload": {"type": "object"},
+                },
+            },
+        },
+    },
+}
+
+_TOOL_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "email.search",
+            "description": "Search email messages.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["query", "user_id"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                    "user_id": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email.read",
+            "description": "Read one email message by id.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["message_id", "user_id"],
+                "properties": {
+                    "message_id": {"type": "string"},
+                    "user_id": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email.draft",
+            "description": "Create an email draft.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["raw_base64", "user_id"],
+                "properties": {
+                    "raw_base64": {"type": "string"},
+                    "user_id": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email.send",
+            "description": "Send an email.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["raw_base64", "user_id"],
+                "properties": {
+                    "raw_base64": {"type": "string"},
+                    "user_id": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar.list_events",
+            "description": "List calendar events in a time range.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "calendar_id": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                    "time_min": {"type": "string"},
+                    "time_max": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar.create_event",
+            "description": "Create a calendar event.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["calendar_id", "event"],
+                "properties": {
+                    "calendar_id": {"type": "string"},
+                    "event": {"type": "object"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar.modify_event",
+            "description": "Modify a calendar event.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["calendar_id", "event_id", "event"],
+                "properties": {
+                    "calendar_id": {"type": "string"},
+                    "event_id": {"type": "string"},
+                    "event": {"type": "object"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notes.create",
+            "description": "Create a note.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "body"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tasks.create",
+            "description": "Create a task.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tasks.list",
+            "description": "List tasks.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "spotify.play",
+            "description": "Start Spotify playback.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "context_uri": {"type": "string"},
+                    "uris": {"type": "array", "items": {"type": "string"}},
+                    "offset": {"type": "object"},
+                    "position_ms": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "spotify.pause",
+            "description": "Pause Spotify playback.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "spotify.skip",
+            "description": "Skip Spotify track.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
+        },
+    },
+]
 
 
 def _load_system_prompt() -> str:
@@ -43,37 +266,40 @@ def _build_messages(
     user_message: str,
     forced_tool: str | None,
     history: list[dict[str, str]] | None = None,
+    use_native_tools: bool = False,
 ) -> list[dict[str, str]]:
     system_prompt = _load_system_prompt()
-    tool_instructions = (
-        "Tools available:\n"
-        "- email.search (read): payload {query, max_results, user_id}\n"
-        "- email.read (read): payload {message_id, user_id}\n"
-        "- email.draft (write, no confirmation): payload {raw_base64, user_id}\n"
-        "- email.send (write, confirmation): payload {raw_base64, user_id}\n"
-        "- calendar.list_events (read): payload {calendar_id, max_results, time_min, time_max}\n"
-        "- calendar.create_event (write, confirmation): payload {calendar_id, event}\n"
-        "- calendar.modify_event (write, confirmation): payload {calendar_id, event_id, event}\n"
-        "- notes.create (write, confirmation): payload {title, body}\n"
-        "- tasks.create (write, confirmation): payload {title, notes}\n"
-        "- tasks.list (read): payload {}\n"
-        "- spotify.play (write): payload {context_uri, uris, offset, position_ms}\n"
-        "- spotify.pause (write): payload {}\n"
-        "- spotify.skip (write): payload {}\n"
-        "Return ONLY valid JSON with keys: response (string), action (object or null).\n"
-        "If action is used, include tool and payload fields.\n"
-        "If no tool is required, action must be null and provide a natural conversational response.\n"
-        "Do not include markdown or commentary outside JSON.\n"
-        "Do not wrap JSON in markdown fences."
-    )
-    if forced_tool:
+    tool_instructions = ""
+    if not use_native_tools:
         tool_instructions = (
-            f"{tool_instructions}\nUse tool: {forced_tool}. "
-            "Do not choose a different tool."
+            "Tools available:\n"
+            "- email.search (read): payload {query, max_results, user_id}\n"
+            "- email.read (read): payload {message_id, user_id}\n"
+            "- email.draft (write, no confirmation): payload {raw_base64, user_id}\n"
+            "- email.send (write, confirmation): payload {raw_base64, user_id}\n"
+            "- calendar.list_events (read): payload {calendar_id, max_results, time_min, time_max}\n"
+            "- calendar.create_event (write, confirmation): payload {calendar_id, event}\n"
+            "- calendar.modify_event (write, confirmation): payload {calendar_id, event_id, event}\n"
+            "- notes.create (write, confirmation): payload {title, body}\n"
+            "- tasks.create (write, confirmation): payload {title, notes}\n"
+            "- tasks.list (read): payload {}\n"
+            "- spotify.play (write): payload {context_uri, uris, offset, position_ms}\n"
+            "- spotify.pause (write): payload {}\n"
+            "- spotify.skip (write): payload {}\n"
+            "Return ONLY valid JSON with keys: response (string), action (object or null).\n"
+            "If action is used, include tool and payload fields.\n"
+            "If no tool is required, action must be null and provide a natural conversational response.\n"
+            "Do not include markdown or commentary outside JSON.\n"
+            "Do not wrap JSON in markdown fences."
         )
+        if forced_tool:
+            tool_instructions = (
+                f"{tool_instructions}\nUse tool: {forced_tool}. "
+                "Do not choose a different tool."
+            )
 
     messages = [
-        {"role": "system", "content": f"{system_prompt}\n\n{tool_instructions}"},
+        {"role": "system", "content": f"{system_prompt}\n\n{tool_instructions}".strip()},
         *_normalize_history(history),
         {"role": "user", "content": user_message},
     ]
@@ -114,6 +340,37 @@ def _require_llm_settings(settings: Settings) -> tuple[str, str, str]:
     return settings.llm_base_url, settings.llm_api_key, settings.llm_model
 
 
+def _build_llm_payload(
+    model: str,
+    message: str,
+    forced_tool: str | None,
+    history: list[dict[str, str]] | None,
+    use_native_tools: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": _build_messages(
+            message,
+            forced_tool,
+            history=history,
+            use_native_tools=use_native_tools,
+        ),
+        "temperature": 0.2,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": _RESPONSE_SCHEMA,
+        },
+    }
+    if use_native_tools:
+        payload["tools"] = _TOOL_DEFINITIONS
+        if forced_tool:
+            payload["tool_choice"] = {
+                "type": "function",
+                "function": {"name": forced_tool},
+            }
+    return payload
+
+
 def generate_response(
     settings: Settings,
     message: str,
@@ -121,20 +378,49 @@ def generate_response(
     history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     base_url, api_key, model = _require_llm_settings(settings)
-    payload = {
-        "model": model,
-        "messages": _build_messages(message, forced_tool, history=history),
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
-    }
+
+    primary_payload = _build_llm_payload(
+        model=model,
+        message=message,
+        forced_tool=forced_tool,
+        history=history,
+        use_native_tools=True,
+    )
+
     try:
         response = httpx.post(
             f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
-            json=payload,
+            json=primary_payload,
             timeout=settings.llm_timeout_seconds,
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        fallback_payload = _build_llm_payload(
+            model=model,
+            message=message,
+            forced_tool=forced_tool,
+            history=history,
+            use_native_tools=False,
+        )
+        try:
+            response = httpx.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=fallback_payload,
+                timeout=settings.llm_timeout_seconds,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as fallback_exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": {
+                        "code": "llm_request_failed",
+                        "message": "Failed to call LLM.",
+                    }
+                },
+            ) from fallback_exc
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=502,
@@ -148,9 +434,8 @@ def generate_response(
 
     try:
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        decoded = _decode_llm_json(content)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        decoded = _parse_llm_choice(data["choices"][0]["message"])
+    except (KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
         raise HTTPException(
             status_code=502,
             detail={
@@ -161,6 +446,52 @@ def generate_response(
             },
         ) from exc
     return decoded
+
+
+def _parse_llm_choice(message: dict[str, Any]) -> dict[str, Any]:
+    content = message.get("content")
+    if content:
+        return _decode_llm_json(content)
+
+    tool_calls = message.get("tool_calls") or message.get("function_calls") or []
+    if isinstance(tool_calls, list) and tool_calls:
+        call = tool_calls[0]
+        if not isinstance(call, dict):
+            raise json.JSONDecodeError("tool call must be an object", str(call), 0)
+
+        function = call.get("function", call)
+        if not isinstance(function, dict):
+            raise json.JSONDecodeError("function call must be an object", str(function), 0)
+
+        tool_name = function.get("name") or call.get("name")
+        raw_arguments = function.get("arguments", call.get("arguments", {}))
+        payload = _parse_tool_arguments(raw_arguments)
+
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise json.JSONDecodeError("tool name is missing", str(tool_name), 0)
+
+        return {
+            "response": "",
+            "action": {
+                "tool": tool_name,
+                "payload": payload,
+            },
+        }
+
+    raise json.JSONDecodeError("No content or structured tool call in response", str(message), 0)
+
+
+def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    if raw_arguments in (None, ""):
+        return {}
+    if isinstance(raw_arguments, str):
+        decoded = json.loads(raw_arguments)
+        if not isinstance(decoded, dict):
+            raise json.JSONDecodeError("Tool arguments must decode to object", raw_arguments, 0)
+        return decoded
+    raise json.JSONDecodeError("Unsupported tool arguments format", str(raw_arguments), 0)
 
 
 def _decode_llm_json(content: Any) -> dict[str, Any]:
