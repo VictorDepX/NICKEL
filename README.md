@@ -56,6 +56,15 @@ Com essa configuração o NICKEL consome a API do GroqCloud, sem necessidade de 
 uvicorn app.main:app --reload
 ```
 
+## Teste conversacional pela CLI
+
+```bash
+export NICKEL_API_BASE_URL="http://localhost:8000"
+python -m cli.main
+```
+
+A CLI mantém histórico local para conversas multi-turno e suporta confirmações com `/confirm` e `/cancel`.
+
 ## OAuth Google
 
 - Inicie o fluxo em `/auth/google/start`.
@@ -83,7 +92,6 @@ uvicorn app.main:app --reload
 - Fluxo unificado: internamente, `/chat` usa `plan -> execute`.
 - Para manter contexto entre turnos, envie também `history`, por exemplo `{ "message": "...", "history": [{"role":"user","content":"..."},{"role":"assistant","content":"..."}] }`.
 - Benefícios do split plan/execute: depuração mais simples, UI mais previsível e menor acoplamento com o provider de LLM.
-- Use a interface web em `/ui` (ela mantém o histórico automaticamente).
 
 ## Memória (opt-in)
 
