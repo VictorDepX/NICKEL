@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from pathlib import Path
 
-from app import calendar, gmail, oauth, pending_actions
+from app import calendar, gmail, oauth, pending_actions, spotify_oauth
 from app.notes import configure_notes_store
 from app.audit import configure_audit_store
 from app.memory import configure_memory_store
@@ -79,6 +79,54 @@ def test_oauth_callback_stores_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     response = client.get(f"/auth/google/callback?code=xyz&state={state}")
     assert response.status_code == 200
     assert response.json()["status"] == "connected"
+
+
+def test_spotify_oauth_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+
+    response = client.get("/auth/spotify/start")
+    body = response.json()
+    assert response.status_code == 200
+    assert body["authorization_url"].startswith("https://accounts.spotify.com/authorize?")
+    assert body["state"]
+
+
+def test_spotify_oauth_callback_stores_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "access_token": "spotify-access",
+                "refresh_token": "spotify-refresh",
+                "expires_in": 3600,
+                "scope": "user-read-playback-state user-modify-playback-state",
+            }
+
+    monkeypatch.setattr("app.spotify_oauth.httpx.post", lambda *args, **kwargs: FakeResponse())
+
+    start_response = client.get("/auth/spotify/start")
+    state = start_response.json()["state"]
+    response = client.get(f"/auth/spotify/callback?code=xyz&state={state}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "connected"
+
+    token_store = oauth.get_token_store(get_settings())
+    token = token_store.get("spotify_default")
+    assert token is not None
+    assert token["access_token"] == "spotify-access"
 
 
 class FakeEventsList:
