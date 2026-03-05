@@ -17,6 +17,7 @@ from app.oauth import exchange_code, start_oauth
 from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
 from app.spotify import skip as spotify_skip
+from app.spotify_oauth import exchange_spotify_code, start_spotify_oauth
 from app.tasks import configure_tasks_store, list_tasks
 
 from app.pending_actions import (
@@ -63,6 +64,20 @@ def google_oauth_callback(
     state: str = Query(...),
 ) -> dict[str, str]:
     return exchange_code(get_settings(), code=code, state=state)
+
+
+@app.get("/auth/spotify/start")
+def spotify_oauth_start() -> dict[str, str]:
+    session = start_spotify_oauth(get_settings())
+    return {"authorization_url": session.authorization_url, "state": session.state}
+
+
+@app.get("/auth/spotify/callback")
+def spotify_oauth_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+) -> dict[str, str]:
+    return exchange_spotify_code(get_settings(), code=code, state=state)
 
 
 @app.post("/tools/calendar/list_events")

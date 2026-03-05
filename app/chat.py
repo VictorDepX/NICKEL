@@ -150,9 +150,7 @@ def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 },
             )
 
-        action_payload = action.get("payload", {})
-        tool_config = TOOL_HANDLERS.get(tool)
-        if tool_config is None:
+        if tool not in TOOL_HANDLERS:
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -162,21 +160,6 @@ def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                     }
                 },
             )
-
-        if tool_config["requires_confirmation"]:
-            pending = require_confirmation(tool, action_payload)
-            return {
-                "status": "pending_confirmation",
-                "response": response_text,
-                "pending_action": pending,
-            }
-
-        tool_result = tool_config["handler"](settings, action_payload)
-        return {
-            "status": "ok",
-            "response": response_text,
-            "tool_result": tool_result,
-        }
 
     return {
         "response": llm_response.get("response", ""),
@@ -281,4 +264,6 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
 
 def handle_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
     plan_result = plan_chat(settings, payload)
+    if "status" in plan_result:
+        return plan_result
     return execute_chat_plan(settings, plan_result)

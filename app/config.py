@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -25,9 +25,13 @@ class Settings:
     tasks_store_path: str | None
     memory_store_path: str | None
     audit_store_path: str | None
-    spotify_access_token: str | None
-    spotify_device_id: str | None
-    spotify_base_url: str | None
+    spotify_access_token: str | None = None
+    spotify_client_id: str | None = None
+    spotify_client_secret: str | None = None
+    spotify_redirect_uri: str | None = None
+    spotify_scopes: tuple[str, ...] = field(default_factory=tuple)
+    spotify_device_id: str | None = None
+    spotify_base_url: str | None = None
 
 
 DEFAULT_SCOPES = (
@@ -36,6 +40,12 @@ DEFAULT_SCOPES = (
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/calendar.events",
+)
+
+DEFAULT_SPOTIFY_SCOPES = (
+    "user-read-playback-state",
+    "user-modify-playback-state",
+    "user-read-currently-playing",
 )
 
 
@@ -66,6 +76,15 @@ def get_settings() -> Settings:
         memory_store_path=os.getenv("MEMORY_STORE_PATH"),
         audit_store_path=os.getenv("AUDIT_STORE_PATH"),
         spotify_access_token=os.getenv("SPOTIFY_ACCESS_TOKEN"),
+        spotify_client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+        spotify_client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
+        spotify_redirect_uri=os.getenv("SPOTIFY_REDIRECT_URI"),
+        spotify_scopes=tuple(
+            scope.strip()
+            for scope in os.getenv("SPOTIFY_SCOPES", "").split(",")
+            if scope.strip()
+        )
+        or DEFAULT_SPOTIFY_SCOPES,
         spotify_device_id=os.getenv("SPOTIFY_DEVICE_ID"),
         spotify_base_url=os.getenv("SPOTIFY_BASE_URL"),
     )
