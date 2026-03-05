@@ -53,14 +53,16 @@ Com essa configuração o NICKEL consome a API do GroqCloud, sem necessidade de 
 ## Executar
 
 ```bash
-uvicorn app.main:app --reload
+make start
 ```
 
-## Teste conversacional pela CLI
+Esse comando sobe a API e já abre a CLI conectada em `http://localhost:8000` para teste imediato.
+
+Se quiser subir separado:
 
 ```bash
-export NICKEL_API_BASE_URL="http://localhost:8000"
-python -m cli.main
+make api   # só API
+make cli   # só CLI
 ```
 
 A CLI mantém histórico local para conversas multi-turno e suporta confirmações com `/confirm` e `/cancel`.
