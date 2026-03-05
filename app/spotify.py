@@ -6,29 +6,21 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import Settings
+from app.spotify_oauth import get_spotify_access_token
 
 
-def _require_spotify_config(settings: Settings) -> tuple[str, str | None]:
-    if not settings.spotify_access_token:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": {
-                    "code": "spotify_not_configured",
-                    "message": "SPOTIFY_ACCESS_TOKEN is missing.",
-                }
-            },
-    )
+def _require_spotify_config(settings: Settings) -> tuple[str, str | None, str]:
+    access_token = get_spotify_access_token(settings)
     base_url = settings.spotify_base_url or "https://api.spotify.com/v1"
-    return base_url, settings.spotify_device_id
+    return base_url, settings.spotify_device_id, access_token
 
 
-def _fetch_devices(settings: Settings, base_url: str) -> list[dict[str, Any]]:
+def _fetch_devices(access_token: str, base_url: str) -> list[dict[str, Any]]:
     try:
         response = httpx.request(
             "GET",
             f"{base_url.rstrip('/')}/me/player/devices",
-            headers={"Authorization": f"Bearer {settings.spotify_access_token}"},
+            headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
         )
         response.raise_for_status()
@@ -84,9 +76,9 @@ def _spotify_request(
     *,
     allow_device_lookup: bool = True,
 ) -> None:
-    base_url, device_id = _require_spotify_config(settings)
+    base_url, device_id, access_token = _require_spotify_config(settings)
     if allow_device_lookup and not device_id:
-        devices = _fetch_devices(settings, base_url)
+        devices = _fetch_devices(access_token, base_url)
         device_id = _select_device_id(devices)
     params: dict[str, str] = {}
     if device_id:
@@ -95,7 +87,7 @@ def _spotify_request(
         response = httpx.request(
             method,
             f"{base_url.rstrip('/')}{path}",
-            headers={"Authorization": f"Bearer {settings.spotify_access_token}"},
+            headers={"Authorization": f"Bearer {access_token}"},
             params=params or None,
             json=payload,
             timeout=10,
