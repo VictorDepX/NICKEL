@@ -90,6 +90,42 @@ PY
 make start
 ```
 
+## Teste conversacional pela CLI
+
+```bash
+export NICKEL_API_BASE_URL="http://localhost:8000"
+python -m cli.main
+```
+
+A CLI mantém histórico local para conversas multi-turno e suporta confirmações com `/confirm` e `/cancel`.
+
+## OAuth Google
+
+- Inicie o fluxo em `/auth/google/start`.
+- Complete o fluxo em `/auth/google/callback?code=...&state=...`.
+
+## Calendar (read-only)
+
+- Liste eventos em `/tools/calendar/list_events`.
+
+## Email (read-only)
+
+- Pesquise emails em `/tools/email/search`.
+- Leia emails em `/tools/email/read`.
+
+## Email (write)
+
+- Crie rascunho em `/tools/email/draft` (sem confirmação).
+- Envie email em `/tools/email/send` (com confirmação).
+
+## Chat (LLM)
+
+- Compatibilidade: continue usando `POST /chat` com `{ "message": "..." }`.
+- Novo planejamento: `POST /chat/plan` retorna plano estruturado com `response`, `action`, `confidence`, `requires_confirmation` e **não executa tool**.
+- Nova execução: `POST /chat/execute` executa uma ação já planejada (ou responde normalmente quando `action` é `null`).
+- Fluxo unificado: internamente, `/chat` usa `plan -> execute`.
+- Para manter contexto entre turnos, envie também `history`, por exemplo `{ "message": "...", "history": [{"role":"user","content":"..."},{"role":"assistant","content":"..."}] }`.
+- Benefícios do split plan/execute: depuração mais simples, UI mais previsível e menor acoplamento com o provider de LLM.
 ### Execução separada
 
 ```bash
