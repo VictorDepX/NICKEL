@@ -5,15 +5,15 @@ from pathlib import Path
 
 from app.actions import execute_action
 from app.audit import configure_audit_store, list_events as list_audit_events, record_event
-from app.calendar import list_events
+from app.calendar import CALENDAR_READ_SCOPES, CALENDAR_WRITE_SCOPES, list_events
 from app.chat import execute_chat_plan, handle_chat, plan_chat
 from app.config import get_settings
-from app.gmail import draft as email_draft
+from app.gmail import GMAIL_COMPOSE_SCOPES, GMAIL_READ_SCOPES, draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
 from app.memory import configure_memory_store, confirm_memory, list_memory, propose_memory
 from app.notes import configure_notes_store
-from app.oauth import exchange_code, start_oauth
+from app.oauth import check_google_connection, exchange_code, start_oauth
 from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
 from app.spotify import skip as spotify_skip
@@ -28,6 +28,36 @@ from app.pending_actions import (
 )
 
 app = FastAPI(title="Nickel API", version="0.1.0")
+
+
+GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
+    "email.search": GMAIL_READ_SCOPES,
+    "email.read": GMAIL_READ_SCOPES,
+    "email.draft": GMAIL_COMPOSE_SCOPES,
+    "email.send": GMAIL_COMPOSE_SCOPES,
+    "calendar.list_events": CALENDAR_READ_SCOPES,
+    "calendar.create_event": CALENDAR_WRITE_SCOPES,
+    "calendar.modify_event": CALENDAR_WRITE_SCOPES,
+}
+
+
+def ensure_google_ready(settings, tool: str) -> None:
+    required_scopes = GOOGLE_TOOL_SCOPES[tool]
+    check = check_google_connection(settings, required_scopes)
+    if check.status == "ready":
+        return
+    raise HTTPException(
+        status_code=401 if check.status != "needs_configuration" else 500,
+        detail={
+            "error": {
+                "code": check.status,
+                "message": "Google Workspace connection is not ready.",
+                "tool": tool,
+                **check.to_response(),
+            }
+        },
+    )
+
 
 
 @app.on_event("startup")
@@ -82,44 +112,55 @@ def spotify_oauth_callback(
 
 @app.post("/tools/calendar/list_events")
 def calendar_list_events(payload: dict[str, object]) -> dict[str, object]:
-    result = list_events(get_settings(), payload)
+    settings = get_settings()
+    ensure_google_ready(settings, "calendar.list_events")
+    result = list_events(settings, payload)
     record_event("calendar.list_events", "ok", payload)
     return result
 
 
 @app.post("/tools/email/search")
 def email_search_messages(payload: dict[str, object]) -> dict[str, object]:
-    result = email_search(get_settings(), payload)
+    settings = get_settings()
+    ensure_google_ready(settings, "email.search")
+    result = email_search(settings, payload)
     record_event("email.search", "ok", payload)
     return result
 
 
 @app.post("/tools/email/read")
 def email_read_message(payload: dict[str, object]) -> dict[str, object]:
-    result = email_read(get_settings(), payload)
+    settings = get_settings()
+    ensure_google_ready(settings, "email.read")
+    result = email_read(settings, payload)
     record_event("email.read", "ok", payload)
     return result
 
 
 @app.post("/tools/calendar/create_event")
 def calendar_create_event(payload: dict[str, object]) -> dict[str, object]:
+    ensure_google_ready(get_settings(), "calendar.create_event")
     return require_confirmation("calendar.create_event", payload)
 
 
 @app.post("/tools/calendar/modify_event")
 def calendar_modify_event(payload: dict[str, object]) -> dict[str, object]:
+    ensure_google_ready(get_settings(), "calendar.modify_event")
     return require_confirmation("calendar.modify_event", payload)
 
 
 @app.post("/tools/email/draft")
 def email_draft_message(payload: dict[str, object]) -> dict[str, object]:
-    result = email_draft(get_settings(), payload)
+    settings = get_settings()
+    ensure_google_ready(settings, "email.draft")
+    result = email_draft(settings, payload)
     record_event("email.draft", "ok", payload)
     return result
 
 
 @app.post("/tools/email/send")
 def email_send_message(payload: dict[str, object]) -> dict[str, object]:
+    ensure_google_ready(get_settings(), "email.send")
     return require_confirmation("email.send", payload)
 
 

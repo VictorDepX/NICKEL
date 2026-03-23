@@ -5,19 +5,46 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.audit import record_event
-from app.calendar import list_events as calendar_list
+from app.calendar import CALENDAR_READ_SCOPES, CALENDAR_WRITE_SCOPES, list_events as calendar_list
 from app.config import Settings
-from app.gmail import draft as email_draft
+from app.gmail import GMAIL_COMPOSE_SCOPES, GMAIL_READ_SCOPES, draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
 from app.llm import generate_response
 from app.orchestrator import decide_tool, is_high_confidence
+from app.oauth import check_google_connection
 from app.pending_actions import require_confirmation
 from app.spotify import pause as spotify_pause
 from app.spotify import play as spotify_play
 from app.spotify import skip as spotify_skip
 from app.tasks import list_tasks
 
+
+
+GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
+    "email.search": GMAIL_READ_SCOPES,
+    "email.read": GMAIL_READ_SCOPES,
+    "email.draft": GMAIL_COMPOSE_SCOPES,
+    "email.send": GMAIL_COMPOSE_SCOPES,
+    "calendar.list_events": CALENDAR_READ_SCOPES,
+    "calendar.create_event": CALENDAR_WRITE_SCOPES,
+    "calendar.modify_event": CALENDAR_WRITE_SCOPES,
+}
+
+
+def _google_preflight_response(settings: Settings, tool: str) -> dict[str, Any] | None:
+    required_scopes = GOOGLE_TOOL_SCOPES.get(tool)
+    if required_scopes is None:
+        return None
+    check = check_google_connection(settings, required_scopes)
+    if check.status == "ready":
+        return None
+    return {
+        "status": check.status,
+        "response": "A conexão com Google Workspace precisa de atenção antes de continuar.",
+        "tool": tool,
+        "google_connection": check.to_response(),
+    }
 
 _CONFIRMATION_REQUIRED_TOOLS = {
     "email.send",
@@ -221,6 +248,10 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
 
     tool = action.get("tool")
     action_payload = action.get("payload", {})
+
+    preflight_response = _google_preflight_response(settings, str(tool)) if tool else None
+    if preflight_response is not None:
+        return preflight_response
     if tool == "email.search":
         tool_result = email_search(settings, action_payload)
         return {"status": "ok", "response": response_text, "tool_result": tool_result}

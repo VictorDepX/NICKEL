@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
 from cryptography.fernet import Fernet, InvalidToken
+from fastapi import HTTPException
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -20,6 +19,21 @@ from app.config import Settings
 class OAuthSession:
     state: str
     authorization_url: str
+
+
+@dataclass
+class GoogleConnectionCheck:
+    status: str
+    authorization_url: str | None = None
+    state: str | None = None
+    missing_config: list[str] | None = None
+    missing_scopes: list[str] | None = None
+    credentials: Credentials | None = None
+
+    def to_response(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload.pop("credentials", None)
+        return payload
 
 
 class TokenStore:
@@ -47,8 +61,6 @@ class TokenStore:
                     }
                 },
             ) from exc
-        data = json.loads(self._storage_path.read_text(encoding="utf-8"))
-        self._tokens = {user_id: bytes.fromhex(value) for user_id, value in data.items()}
 
     def _persist(self) -> None:
         if not self._storage_path:
@@ -99,24 +111,31 @@ _token_store: TokenStore | None = None
 state_store = StateStore()
 
 
-def build_flow(settings: Settings) -> Flow:
-    if not settings.google_client_id or not settings.google_client_secret:
+
+def _missing_google_config(settings: Settings) -> list[str]:
+    missing: list[str] = []
+    if not settings.google_client_id:
+        missing.append("GOOGLE_CLIENT_ID")
+    if not settings.google_client_secret:
+        missing.append("GOOGLE_CLIENT_SECRET")
+    if not settings.google_redirect_uri:
+        missing.append("GOOGLE_REDIRECT_URI")
+    if not settings.oauth_token_key:
+        missing.append("OAUTH_TOKEN_KEY")
+    return missing
+
+
+
+def build_flow(settings: Settings, scopes: tuple[str, ...] | list[str] | None = None) -> Flow:
+    missing_config = _missing_google_config(settings)
+    if missing_config:
         raise HTTPException(
             status_code=500,
             detail={
                 "error": {
                     "code": "oauth_not_configured",
                     "message": "Google OAuth credentials are missing.",
-                }
-            },
-        )
-    if not settings.google_redirect_uri:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": {
-                    "code": "oauth_not_configured",
-                    "message": "GOOGLE_REDIRECT_URI is missing.",
+                    "missing_config": missing_config,
                 }
             },
         )
@@ -130,9 +149,13 @@ def build_flow(settings: Settings) -> Flow:
             "token_uri": "https://oauth2.googleapis.com/token",
         }
     }
-    flow = Flow.from_client_config(client_config, scopes=list(settings.google_scopes))
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=list(scopes or settings.google_scopes),
+    )
     flow.redirect_uri = settings.google_redirect_uri
     return flow
+
 
 
 def get_token_store(settings: Settings) -> TokenStore:
@@ -148,17 +171,14 @@ def get_token_store(settings: Settings) -> TokenStore:
         )
     global _token_store
     if _token_store is None:
-        storage_path = (
-            Path(settings.token_store_path)
-            if settings.token_store_path
-            else None
-        )
+        storage_path = Path(settings.token_store_path) if settings.token_store_path else None
         _token_store = TokenStore(settings.oauth_token_key, storage_path)
     return _token_store
 
 
-def start_oauth(settings: Settings) -> OAuthSession:
-    flow = build_flow(settings)
+
+def start_oauth(settings: Settings, scopes: tuple[str, ...] | list[str] | None = None) -> OAuthSession:
+    flow = build_flow(settings, scopes=scopes) if scopes is not None else build_flow(settings)
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -166,6 +186,7 @@ def start_oauth(settings: Settings) -> OAuthSession:
     )
     state_store.add(state)
     return OAuthSession(state=state, authorization_url=authorization_url)
+
 
 
 def exchange_code(settings: Settings, code: str, state: str) -> dict[str, Any]:
@@ -187,33 +208,20 @@ def exchange_code(settings: Settings, code: str, state: str) -> dict[str, Any]:
         {
             "access_token": flow.credentials.token,
             "refresh_token": flow.credentials.refresh_token,
-            "expiry": flow.credentials.expiry.isoformat()
-            if flow.credentials.expiry
-            else None,
+            "expiry": flow.credentials.expiry.isoformat() if flow.credentials.expiry else None,
             "scopes": list(flow.credentials.scopes or []),
         },
     )
     return {"status": "connected"}
 
 
-def get_credentials(settings: Settings) -> Credentials:
-    token_store = get_token_store(settings)
-    token = token_store.get("default")
-    if not token:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error": {
-                    "code": "not_connected",
-                    "message": "OAuth tokens not found.",
-                }
-            },
-        )
+
+def _build_credentials(settings: Settings, token: dict[str, Any]) -> Credentials:
     expiry_value = token.get("expiry")
     expiry = datetime.fromisoformat(expiry_value) if expiry_value else None
     if expiry and expiry.tzinfo is not None:
         expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
-    credentials = Credentials(
+    return Credentials(
         token=token.get("access_token"),
         refresh_token=token.get("refresh_token"),
         token_uri="https://oauth2.googleapis.com/token",
@@ -222,38 +230,98 @@ def get_credentials(settings: Settings) -> Credentials:
         scopes=token.get("scopes"),
         expiry=expiry,
     )
+
+
+
+def check_google_connection(
+    settings: Settings,
+    required_scopes: tuple[str, ...] | list[str],
+) -> GoogleConnectionCheck:
+    required = list(dict.fromkeys(required_scopes))
+    missing_config = _missing_google_config(settings)
+    if missing_config:
+        return GoogleConnectionCheck(
+            status="needs_configuration",
+            missing_config=missing_config,
+            missing_scopes=required or None,
+        )
+
+    token_store = get_token_store(settings)
+    token = token_store.get("default")
+    if not token:
+        session = start_oauth(settings, scopes=required)
+        return GoogleConnectionCheck(
+            status="needs_connection",
+            authorization_url=session.authorization_url,
+            state=session.state,
+            missing_scopes=required or None,
+        )
+
+    credentials = _build_credentials(settings, token)
     if credentials.expired:
         if not credentials.refresh_token:
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error": {
-                        "code": "token_expired",
-                        "message": "Access token expired and no refresh token is available.",
-                    }
-                },
+            session = start_oauth(settings, scopes=required)
+            return GoogleConnectionCheck(
+                status="needs_reauth",
+                authorization_url=session.authorization_url,
+                state=session.state,
+                missing_scopes=required or None,
             )
         try:
             credentials.refresh(Request())
-        except Exception as exc:
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error": {
-                        "code": "token_expired",
-                        "message": "Failed to refresh access token.",
-                    }
-                },
-            ) from exc
+        except Exception:
+            session = start_oauth(settings, scopes=required)
+            return GoogleConnectionCheck(
+                status="needs_reauth",
+                authorization_url=session.authorization_url,
+                state=session.state,
+                missing_scopes=required or None,
+            )
         token_store.store(
             "default",
             {
                 "access_token": credentials.token,
                 "refresh_token": credentials.refresh_token,
-                "expiry": credentials.expiry.isoformat()
-                if credentials.expiry
-                else None,
-                "scopes": list(credentials.scopes or []),
+                "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+                "scopes": list(credentials.scopes or token.get("scopes") or []),
             },
         )
-    return credentials
+
+    token_scopes = set(credentials.scopes or token.get("scopes") or [])
+    missing_scopes = [scope for scope in required if scope not in token_scopes]
+    if missing_scopes:
+        requested_scopes = tuple(dict.fromkeys([*settings.google_scopes, *required]))
+        session = start_oauth(settings, scopes=requested_scopes)
+        return GoogleConnectionCheck(
+            status="missing_scopes",
+            authorization_url=session.authorization_url,
+            state=session.state,
+            missing_scopes=missing_scopes,
+        )
+
+    return GoogleConnectionCheck(status="ready", credentials=credentials)
+
+
+
+def require_google_connection(
+    settings: Settings,
+    required_scopes: tuple[str, ...] | list[str],
+) -> Credentials:
+    check = check_google_connection(settings, required_scopes)
+    if check.status == "ready" and check.credentials is not None:
+        return check.credentials
+    raise HTTPException(
+        status_code=401 if check.status != "needs_configuration" else 500,
+        detail={
+            "error": {
+                "code": check.status,
+                "message": "Google Workspace connection is not ready.",
+                **check.to_response(),
+            }
+        },
+    )
+
+
+
+def get_credentials(settings: Settings) -> Credentials:
+    return require_google_connection(settings, settings.google_scopes)

@@ -19,6 +19,7 @@ def _settings() -> Settings:
         llm_temperature=0.2,
         llm_retry_count=2,
         llm_retry_backoff_ms=250,
+        llm_enable_native_tools=False,
         token_store_path=None,
         pending_actions_path=None,
         notes_store_path=None,
@@ -26,6 +27,10 @@ def _settings() -> Settings:
         memory_store_path=None,
         audit_store_path=None,
         spotify_access_token=None,
+        spotify_client_id=None,
+        spotify_client_secret=None,
+        spotify_redirect_uri=None,
+        spotify_scopes=(),
         spotify_device_id=None,
         spotify_base_url=None,
     )
@@ -151,6 +156,7 @@ def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
         "email.read",
         {"handler": fake_email_read, "requires_confirmation": False},
     )
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
 
     result = handle_chat(_settings(), {"message": "ler email"})
 
@@ -175,6 +181,7 @@ def test_handle_chat_routes_supported_confirmation_tool(monkeypatch) -> None:
 
     monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
     monkeypatch.setattr("app.chat.require_confirmation", fake_require_confirmation)
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
 
     result = handle_chat(_settings(), {"message": "enviar email"})
 
@@ -190,8 +197,6 @@ def test_handle_chat_routes_supported_confirmation_tool(monkeypatch) -> None:
 
 
 def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) -> None:
-    from fastapi import HTTPException
-
     def fake_generate_response(settings, message, forced_tool=None, history=None):
         return {
             "response": "Não consegui",
@@ -200,15 +205,6 @@ def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) ->
 
     monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
 
-    try:
-        handle_chat(_settings(), {"message": "fazer algo"})
-    except HTTPException as exc:
-        assert exc.status_code == 400
-        assert exc.detail == {
-            "error": {
-                "code": "unsupported_tool",
-                "message": "Tool invalid.tool is not supported.",
-            }
-        }
-    else:
-        raise AssertionError("Expected HTTPException for unsupported tool")
+    result = handle_chat(_settings(), {"message": "fazer algo"})
+    assert result["status"] == "requires_clarification"
+    assert result["fallback"] == "low_confidence_action"
