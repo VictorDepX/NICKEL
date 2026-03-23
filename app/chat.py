@@ -31,7 +31,23 @@ ReadinessStatus = Literal[
     "needs_connection",
     "needs_external_activation",
     "blocked",
+    "requires_clarification",
 ]
+
+_MINIMUM_TOOL_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "email.search": ("query",),
+    "email.read": ("message_id",),
+    "email.draft": ("raw_base64",),
+    "email.send": ("raw_base64",),
+    "calendar.create_event": ("calendar_id", "event"),
+    "calendar.modify_event": ("calendar_id", "event_id", "event"),
+    "notes.create": ("title", "body"),
+    "tasks.create": ("title",),
+}
+
+_SEMANTIC_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "spotify.play": ("context_uri", "uris"),
+}
 
 
 
@@ -209,13 +225,16 @@ def _tool_not_ready_response(
     readiness: dict[str, Any],
 ) -> dict[str, Any]:
     natural_response = response_text.strip() or readiness["explanation"]
-    return {
-        "status": "tool_not_ready",
+    result = {
+        "status": readiness["status"],
         "response": natural_response,
         "action": action,
         "tool_readiness": readiness,
         "requires_confirmation": False,
     }
+    if "authorization_url" in readiness:
+        result["authorization_url"] = readiness["authorization_url"]
+    return result
 
 
 def _resolve_google_readiness(
@@ -288,48 +307,43 @@ def _resolve_spotify_readiness(
     _payload: dict[str, Any],
 ) -> dict[str, Any]:
     required_scopes = _SPOTIFY_TOOL_SCOPES.get(tool, ())
-    if settings.spotify_access_token:
-        access_token = settings.spotify_access_token
-        granted_scopes = set(required_scopes)
-    else:
-        if not settings.oauth_token_key:
-            return _readiness_result(
-                status="needs_user_setup",
-                tool=tool,
-                explanation="A integração do Spotify ainda não foi configurada neste ambiente.",
-                technical_details="SPOTIFY_ACCESS_TOKEN ausente e OAUTH_TOKEN_KEY não configurado.",
-                missing_factor="spotify_configuration",
-            )
-        if (
-            not settings.spotify_client_id
-            or not settings.spotify_client_secret
-            or not settings.spotify_redirect_uri
-        ):
-            return _readiness_result(
-                status="needs_user_setup",
-                tool=tool,
-                explanation="A autenticação OAuth do Spotify ainda precisa ser configurada.",
-                technical_details="Spotify client_id/client_secret/redirect_uri ausentes.",
-                missing_factor="spotify_oauth_configuration",
-            )
+    connection = check_spotify_connection(settings)
+    if connection.status == "needs_configuration":
+        return _readiness_result(
+            status="needs_user_setup",
+            tool=tool,
+            explanation="A integração do Spotify ainda não foi configurada neste ambiente.",
+            technical_details=connection.message or "Spotify OAuth não configurado.",
+            missing_factor="spotify_configuration",
+            authorization_url=connection.authorization_url,
+            state=connection.state,
+        )
+    if connection.status in {"needs_connection", "needs_reauth"}:
+        return _readiness_result(
+            status="needs_connection",
+            tool=tool,
+            explanation="Preciso conectar ou reconectar sua conta Spotify antes de controlar a reprodução.",
+            technical_details=connection.message or "Spotify OAuth indisponível.",
+            missing_factor="spotify_account_connection",
+            authorization_url=connection.authorization_url,
+            state=connection.state,
+        )
+
+    access_token = connection.access_token
+    if not access_token:
+        return _readiness_result(
+            status="blocked",
+            tool=tool,
+            explanation="A conexão com Spotify está inconsistente e não pode ser usada agora.",
+            technical_details="Spotify marcado como pronto sem access_token.",
+            missing_factor="spotify_access_token",
+        )
+
+    if not settings.spotify_access_token:
         token_store = get_token_store(settings)
-        token = token_store.get(SPOTIFY_TOKEN_STORE_KEY)
-        if not token:
-            session = start_spotify_oauth(settings)
-            return _readiness_result(
-                status="needs_connection",
-                tool=tool,
-                explanation="Preciso conectar sua conta Spotify antes de controlar a reprodução.",
-                technical_details="Nenhum token OAuth do Spotify foi encontrado.",
-                missing_factor="spotify_account_connection",
-                authorization_url=session.authorization_url,
-                state=session.state,
-            )
-        access_token = token.get("access_token")
+        token = token_store.get(SPOTIFY_TOKEN_STORE_KEY) or {}
         granted_scopes = set(token.get("scopes") or [])
-        missing_scopes = [
-            scope for scope in required_scopes if scope not in granted_scopes
-        ]
+        missing_scopes = [scope for scope in required_scopes if scope not in granted_scopes]
         if missing_scopes:
             session = start_spotify_oauth(settings)
             return _readiness_result(
@@ -340,14 +354,6 @@ def _resolve_spotify_readiness(
                 missing_factor="spotify_oauth_scopes",
                 authorization_url=session.authorization_url,
                 state=session.state,
-            )
-        if not access_token:
-            return _readiness_result(
-                status="blocked",
-                tool=tool,
-                explanation="A conexão com Spotify está inconsistente e não pode ser usada agora.",
-                technical_details="Token OAuth do Spotify armazenado sem access_token.",
-                missing_factor="spotify_access_token",
             )
 
     if (
@@ -387,6 +393,85 @@ def resolve_tool_readiness(
         tool=tool,
         explanation="Tool pronta para execução.",
         technical_details="Nenhum pré-requisito externo adicional exigido.",
+        missing_factor="none",
+    )
+
+
+def _missing_required_fields(tool: str, payload: dict[str, Any]) -> list[str]:
+    required_fields = _MINIMUM_TOOL_REQUIREMENTS.get(tool, ())
+    missing: list[str] = []
+    for field in required_fields:
+        value = payload.get(field)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(field)
+    return missing
+
+
+def _is_semantically_incomplete(tool: str, payload: dict[str, Any]) -> bool:
+    if tool != "spotify.play":
+        return False
+    return not any(payload.get(field) for field in _SEMANTIC_REQUIREMENTS[tool])
+
+
+def resolve_action_readiness(
+    settings: Settings,
+    tool: str,
+    payload: dict[str, Any],
+    user_message: str,
+    *,
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    base_readiness = resolve_tool_readiness(settings, tool, payload)
+    if base_readiness["status"] != "ready":
+        return base_readiness
+
+    missing_fields = _missing_required_fields(tool, payload)
+    if missing_fields:
+        missing_list = ", ".join(missing_fields)
+        return _readiness_result(
+            status="requires_clarification",
+            tool=tool,
+            explanation=(
+                f"Antes de executar {tool}, preciso confirmar alguns dados: {missing_list}."
+            ),
+            technical_details=(
+                f"Payload sem parâmetros mínimos obrigatórios: {missing_list}."
+            ),
+            missing_factor="missing_required_parameters",
+        )
+
+    if _is_semantically_incomplete(tool, payload):
+        return _readiness_result(
+            status="requires_clarification",
+            tool=tool,
+            explanation=(
+                "Consigo controlar o Spotify, mas ainda preciso saber exatamente o que tocar."
+            ),
+            technical_details=(
+                "Payload semanticamente incompleto: spotify.play sem context_uri nem uris."
+            ),
+            missing_factor="semantic_payload_gap",
+        )
+
+    if confidence is not None and confidence < 0.75:
+        return _readiness_result(
+            status="requires_clarification",
+            tool=tool,
+            explanation=(
+                "Ainda não tenho confiança suficiente para executar essa ação automaticamente. "
+                "Pode confirmar ou detalhar melhor o pedido?"
+            ),
+            technical_details=(
+                f"Heurística/orquestração com baixa confiança ({confidence:.2f}) para a mensagem: {user_message!r}."
+            ),
+            missing_factor="low_confidence_action",
+        )
+
+    return _readiness_result(
+        status="ready",
+        tool=tool,
+        explanation="Tool pronta para execução.",
+        technical_details="Conexão, parâmetros mínimos e contexto suficientes.",
         missing_factor="none",
     )
 
@@ -464,7 +549,13 @@ def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 fallback="unsupported_llm_tool",
             )
 
-        readiness = resolve_tool_readiness(settings, tool, action.get("payload", {}))
+        readiness = resolve_action_readiness(
+            settings,
+            tool,
+            action.get("payload", {}),
+            message,
+            confidence=decision.confidence,
+        )
         if readiness["status"] != "ready":
             return _tool_not_ready_response(
                 response_text=response_text,
@@ -503,7 +594,13 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
 
     tool = action.get("tool")
     action_payload = action.get("payload", {})
-    readiness = resolve_tool_readiness(settings, tool, action_payload)
+    readiness = resolve_action_readiness(
+        settings,
+        str(tool),
+        action_payload if isinstance(action_payload, dict) else {},
+        str(response_text),
+        confidence=payload.get("confidence"),
+    )
     if readiness["status"] != "ready":
         return _tool_not_ready_response(
             response_text=response_text,
