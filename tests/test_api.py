@@ -815,6 +815,45 @@ def test_chat_plan_sensitive_action_requires_confirmation_without_execution(monk
     assert body["response"] == "Posso enviar esse email assim que você confirmar."
 
 
+def test_chat_returns_clarification_for_unsupported_llm_action_without_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    configure_audit_store(tmp_path / "audit.json")
+
+    def _fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unsupported llm action should not execute")
+
+    monkeypatch.setattr(
+        "app.chat.generate_response",
+        lambda *_args, **_kwargs: {
+            "response": "Posso procurar essa música se você confirmar melhor.",
+            "action": {
+                "tool": "spotify.search",
+                "payload": {"query": "Numb"},
+            },
+        },
+    )
+    monkeypatch.setattr("app.chat.spotify_play", _fail)
+    monkeypatch.setattr("app.chat.spotify_pause", _fail)
+    monkeypatch.setattr("app.chat.spotify_skip", _fail)
+
+    response = client.post("/chat", json={"message": "spotify tocar e pausar"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "requires_clarification"
+    assert body["fallback"] == "low_confidence_action"
+    assert body["orchestration"]["llm_tool"] == "spotify.search"
+
+    audit_events = client.get("/audit", params={"tool": "orchestrator.low_confidence_action"})
+    assert audit_events.status_code == 200
+    events = audit_events.json()["data"]["events"]
+    assert events
+    latest_event = events[-1]
+    assert latest_event["payload"]["llm_tool"] == "spotify.search"
+    assert latest_event["payload"]["decision_reason"] == "ambiguous_tool_match:spotify.pause,spotify.play"
+
+
 def test_routes_call_underlying_handlers_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"tasks": 0, "play": 0, "pause": 0, "skip": 0, "audit": 0}
 

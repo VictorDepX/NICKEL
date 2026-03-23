@@ -91,6 +91,32 @@ def _compute_confidence(requested_tool: str | None, action_tool: str | None) -> 
     return 0.8
 
 
+def _clarification_result(
+    *,
+    decision: Any,
+    llm_tool: str | None,
+    response_text: str,
+    fallback: str,
+) -> dict[str, Any]:
+    clarification_response = response_text.strip() or (
+        "Não tenho confiança suficiente para executar essa ação ainda. "
+        "Pode esclarecer o que você quer fazer?"
+    )
+    return {
+        "status": "requires_clarification",
+        "response": clarification_response,
+        "fallback": fallback,
+        "orchestration": {
+            "decision": {
+                "tool": decision.tool,
+                "reason": decision.reason,
+                "confidence": decision.confidence,
+            },
+            "llm_tool": llm_tool,
+        },
+    }
+
+
 def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
     message = _require_message(payload)
     history = _parse_history(payload)
@@ -138,7 +164,7 @@ def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 },
             }
 
-        if decision.tool is None and tool:
+        if tool and (decision.tool is None or not is_high_confidence(decision)):
             record_event(
                 tool="orchestrator.low_confidence_action",
                 status="observed",
@@ -149,16 +175,19 @@ def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                     "llm_tool": tool,
                 },
             )
+            return _clarification_result(
+                decision=decision,
+                llm_tool=tool,
+                response_text=response_text,
+                fallback="low_confidence_action",
+            )
 
         if tool not in TOOL_HANDLERS:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "code": "unsupported_tool",
-                        "message": f"Tool {tool} is not supported.",
-                    }
-                },
+            return _clarification_result(
+                decision=decision,
+                llm_tool=tool,
+                response_text=response_text,
+                fallback="unsupported_llm_tool",
             )
 
     return {
