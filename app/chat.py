@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 
@@ -11,12 +11,27 @@ from app.gmail import draft as email_draft
 from app.gmail import read as email_read
 from app.gmail import search as email_search
 from app.llm import generate_response
+from app.oauth import get_token_store, start_oauth
 from app.orchestrator import decide_tool, is_high_confidence
 from app.pending_actions import require_confirmation
-from app.spotify import pause as spotify_pause
-from app.spotify import play as spotify_play
-from app.spotify import skip as spotify_skip
+from app.spotify import (
+    _fetch_devices,
+    _require_spotify_config,
+    _select_device_id,
+    pause as spotify_pause,
+    play as spotify_play,
+    skip as spotify_skip,
+)
+from app.spotify_oauth import SPOTIFY_TOKEN_STORE_KEY, start_spotify_oauth
 from app.tasks import list_tasks
+
+ReadinessStatus = Literal[
+    "ready",
+    "needs_user_setup",
+    "needs_connection",
+    "needs_external_activation",
+    "blocked",
+]
 
 
 _CONFIRMATION_REQUIRED_TOOLS = {
@@ -46,7 +61,24 @@ TOOL_HANDLERS: dict[str, dict[str, Any]] = {
     "spotify.skip": {"handler": spotify_skip, "requires_confirmation": False},
 }
 
+_GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
+    "email.search": ("https://www.googleapis.com/auth/gmail.readonly",),
+    "email.read": ("https://www.googleapis.com/auth/gmail.readonly",),
+    "email.draft": ("https://www.googleapis.com/auth/gmail.compose",),
+    "email.send": ("https://www.googleapis.com/auth/gmail.send",),
+    "calendar.list_events": ("https://www.googleapis.com/auth/calendar.readonly",),
+    "calendar.create_event": ("https://www.googleapis.com/auth/calendar.events",),
+    "calendar.modify_event": ("https://www.googleapis.com/auth/calendar.events",),
+}
 
+_SPOTIFY_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
+    "spotify.play": ("user-modify-playback-state",),
+    "spotify.pause": ("user-modify-playback-state",),
+    "spotify.skip": ("user-modify-playback-state",),
+}
+
+
+# existing helper funcs preserved below ...
 def _parse_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     history = payload.get("history")
     if not isinstance(history, list):
@@ -115,6 +147,220 @@ def _clarification_result(
             "llm_tool": llm_tool,
         },
     }
+
+
+def _readiness_result(
+    *,
+    status: ReadinessStatus,
+    tool: str,
+    explanation: str,
+    technical_details: str,
+    missing_factor: str,
+    authorization_url: str | None = None,
+    state: str | None = None,
+) -> dict[str, Any]:
+    readiness: dict[str, Any] = {
+        "status": status,
+        "tool": tool,
+        "explanation": explanation,
+        "technical_details": technical_details,
+        "missing_factor": missing_factor,
+    }
+    if authorization_url:
+        readiness["authorization_url"] = authorization_url
+    if state:
+        readiness["state"] = state
+    return readiness
+
+
+def _tool_not_ready_response(
+    *,
+    response_text: str,
+    action: dict[str, Any],
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    natural_response = response_text.strip() or readiness["explanation"]
+    return {
+        "status": "tool_not_ready",
+        "response": natural_response,
+        "action": action,
+        "tool_readiness": readiness,
+        "requires_confirmation": False,
+    }
+
+
+def _resolve_google_readiness(
+    settings: Settings,
+    tool: str,
+    _payload: dict[str, Any],
+) -> dict[str, Any]:
+    required_scopes = _GOOGLE_TOOL_SCOPES.get(tool, ())
+    if (
+        not settings.google_client_id
+        or not settings.google_client_secret
+        or not settings.google_redirect_uri
+    ):
+        return _readiness_result(
+            status="needs_user_setup",
+            tool=tool,
+            explanation="A integração com Google ainda não foi configurada neste ambiente.",
+            technical_details="Google OAuth client_id/client_secret/redirect_uri ausentes.",
+            missing_factor="google_oauth_configuration",
+        )
+    if not settings.oauth_token_key:
+        return _readiness_result(
+            status="needs_user_setup",
+            tool=tool,
+            explanation="O armazenamento seguro de tokens OAuth ainda não foi configurado.",
+            technical_details="OAUTH_TOKEN_KEY ausente para persistir tokens do Google.",
+            missing_factor="oauth_token_storage",
+        )
+
+    token_store = get_token_store(settings)
+    token = token_store.get("default")
+    if not token:
+        session = start_oauth(settings)
+        return _readiness_result(
+            status="needs_connection",
+            tool=tool,
+            explanation="Preciso conectar sua conta Google antes de usar essa ferramenta.",
+            technical_details="Nenhum token OAuth do Google foi encontrado para o usuário padrão.",
+            missing_factor="google_account_connection",
+            authorization_url=session.authorization_url,
+            state=session.state,
+        )
+
+    granted_scopes = set(token.get("scopes") or [])
+    missing_scopes = [scope for scope in required_scopes if scope not in granted_scopes]
+    if missing_scopes:
+        session = start_oauth(settings)
+        return _readiness_result(
+            status="needs_external_activation",
+            tool=tool,
+            explanation="Sua conexão Google existe, mas faltam permissões para concluir essa ação.",
+            technical_details=f"Scopes ausentes: {', '.join(missing_scopes)}.",
+            missing_factor="google_oauth_scopes",
+            authorization_url=session.authorization_url,
+            state=session.state,
+        )
+
+    return _readiness_result(
+        status="ready",
+        tool=tool,
+        explanation="Tool pronta para execução.",
+        technical_details="Pré-requisitos do Google atendidos.",
+        missing_factor="none",
+    )
+
+
+def _resolve_spotify_readiness(
+    settings: Settings,
+    tool: str,
+    _payload: dict[str, Any],
+) -> dict[str, Any]:
+    required_scopes = _SPOTIFY_TOOL_SCOPES.get(tool, ())
+    if settings.spotify_access_token:
+        access_token = settings.spotify_access_token
+        granted_scopes = set(required_scopes)
+    else:
+        if not settings.oauth_token_key:
+            return _readiness_result(
+                status="needs_user_setup",
+                tool=tool,
+                explanation="A integração do Spotify ainda não foi configurada neste ambiente.",
+                technical_details="SPOTIFY_ACCESS_TOKEN ausente e OAUTH_TOKEN_KEY não configurado.",
+                missing_factor="spotify_configuration",
+            )
+        if (
+            not settings.spotify_client_id
+            or not settings.spotify_client_secret
+            or not settings.spotify_redirect_uri
+        ):
+            return _readiness_result(
+                status="needs_user_setup",
+                tool=tool,
+                explanation="A autenticação OAuth do Spotify ainda precisa ser configurada.",
+                technical_details="Spotify client_id/client_secret/redirect_uri ausentes.",
+                missing_factor="spotify_oauth_configuration",
+            )
+        token_store = get_token_store(settings)
+        token = token_store.get(SPOTIFY_TOKEN_STORE_KEY)
+        if not token:
+            session = start_spotify_oauth(settings)
+            return _readiness_result(
+                status="needs_connection",
+                tool=tool,
+                explanation="Preciso conectar sua conta Spotify antes de controlar a reprodução.",
+                technical_details="Nenhum token OAuth do Spotify foi encontrado.",
+                missing_factor="spotify_account_connection",
+                authorization_url=session.authorization_url,
+                state=session.state,
+            )
+        access_token = token.get("access_token")
+        granted_scopes = set(token.get("scopes") or [])
+        missing_scopes = [
+            scope for scope in required_scopes if scope not in granted_scopes
+        ]
+        if missing_scopes:
+            session = start_spotify_oauth(settings)
+            return _readiness_result(
+                status="needs_external_activation",
+                tool=tool,
+                explanation="Sua conexão Spotify existe, mas faltam permissões para controlar a reprodução.",
+                technical_details=f"Scopes ausentes: {', '.join(missing_scopes)}.",
+                missing_factor="spotify_oauth_scopes",
+                authorization_url=session.authorization_url,
+                state=session.state,
+            )
+        if not access_token:
+            return _readiness_result(
+                status="blocked",
+                tool=tool,
+                explanation="A conexão com Spotify está inconsistente e não pode ser usada agora.",
+                technical_details="Token OAuth do Spotify armazenado sem access_token.",
+                missing_factor="spotify_access_token",
+            )
+
+    if (
+        tool in {"spotify.play", "spotify.pause", "spotify.skip"}
+        and not settings.spotify_device_id
+    ):
+        base_url, _, token_value = _require_spotify_config(settings)
+        devices = _fetch_devices(token_value, base_url)
+        if not _select_device_id(devices):
+            return _readiness_result(
+                status="needs_external_activation",
+                tool=tool,
+                explanation="Preciso que exista um device Spotify ativo ou disponível antes de executar essa ação.",
+                technical_details="Nenhum device reproduzível foi encontrado em /me/player/devices.",
+                missing_factor="spotify_playback_device",
+            )
+
+    return _readiness_result(
+        status="ready",
+        tool=tool,
+        explanation="Tool pronta para execução.",
+        technical_details="Pré-requisitos do Spotify atendidos.",
+        missing_factor="none",
+    )
+
+
+def resolve_tool_readiness(
+    settings: Settings,
+    tool: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if tool.startswith("email.") or tool.startswith("calendar."):
+        return _resolve_google_readiness(settings, tool, payload)
+    if tool.startswith("spotify."):
+        return _resolve_spotify_readiness(settings, tool, payload)
+    return _readiness_result(
+        status="ready",
+        tool=tool,
+        explanation="Tool pronta para execução.",
+        technical_details="Nenhum pré-requisito externo adicional exigido.",
+        missing_factor="none",
+    )
 
 
 def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
@@ -190,6 +436,14 @@ def plan_chat(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
                 fallback="unsupported_llm_tool",
             )
 
+        readiness = resolve_tool_readiness(settings, tool, action.get("payload", {}))
+        if readiness["status"] != "ready":
+            return _tool_not_ready_response(
+                response_text=response_text,
+                action=action,
+                readiness=readiness,
+            )
+
     return {
         "response": llm_response.get("response", ""),
         "action": action if isinstance(action, dict) else None,
@@ -221,6 +475,14 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
 
     tool = action.get("tool")
     action_payload = action.get("payload", {})
+    readiness = resolve_tool_readiness(settings, tool, action_payload)
+    if readiness["status"] != "ready":
+        return _tool_not_ready_response(
+            response_text=response_text,
+            action=action,
+            readiness=readiness,
+        )
+
     if tool == "email.search":
         tool_result = email_search(settings, action_payload)
         return {"status": "ok", "response": response_text, "tool_result": tool_result}
