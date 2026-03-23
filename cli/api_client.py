@@ -15,7 +15,12 @@ class PendingAction:
 @dataclass
 class AgentResponse:
     reply: str
+    status: str
+    requires_confirmation: bool
     pending_action: PendingAction | None
+    authorization_url: str | None
+    service: str | None
+    fallback: str | None
 
 
 @dataclass
@@ -35,9 +40,19 @@ class NickelAPIClient:
     def send_message(self, message: str, history: list[dict[str, str]]) -> AgentResponse:
         payload = {"message": message, "history": history}
         data = self._request("POST", "/chat", json=payload)
+        connection = _extract_connection_details(data)
         return AgentResponse(
             reply=str(data.get("response", "")),
+            status=str(data.get("status", "ok")),
+            requires_confirmation=bool(data.get("requires_confirmation", False)),
             pending_action=_parse_pending_action(data.get("pending_action")),
+            authorization_url=_coerce_optional_string(
+                data.get("authorization_url") or connection.get("authorization_url")
+            ),
+            service=_coerce_optional_string(
+                data.get("service") or connection.get("service") or connection.get("provider")
+            ),
+            fallback=_coerce_optional_string(data.get("fallback")),
         )
 
     def confirm_action(self, action_id: str) -> ActionResponse:
@@ -75,6 +90,21 @@ def _parse_pending_action(payload: Any) -> PendingAction | None:
     if not action_id or not tool:
         return None
     return PendingAction(action_id=str(action_id), tool=str(tool))
+
+
+def _extract_connection_details(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in ("google_connection", "tool_readiness"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _coerce_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _extract_result_text(payload: dict[str, Any]) -> str:

@@ -66,5 +66,20 @@ def print_pending(tool: str, action_id: str) -> None:
     _print_box("CONFIRMAÇÃO", info, _YELLOW)
 
 
+def print_uncertainty_notice(message: str) -> None:
+    _print_box("INCERTEZA", message, _YELLOW)
+
+
+def print_connection_notice(message: str, authorization_url: str | None = None) -> None:
+    details = message
+    if authorization_url:
+        details = f"{message}\n\nLink de conexão:\n{authorization_url}"
+    _print_box("CONEXÃO PENDENTE", details, _YELLOW)
+
+
+def print_user_action_instruction(message: str) -> None:
+    _print_box("PRÓXIMO PASSO", message, _CYAN)
+
+
 def clear_screen() -> None:
     os.system("cls" if os.name == "nt" else "clear")
