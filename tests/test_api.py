@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -127,6 +128,67 @@ def test_spotify_oauth_callback_stores_tokens(monkeypatch: pytest.MonkeyPatch) -
     token = token_store.get("spotify_default")
     assert token is not None
     assert token["access_token"] == "spotify-access"
+
+
+def test_spotify_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    monkeypatch.delenv("SPOTIFY_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("SPOTIFY_REDIRECT_URI", raising=False)
+    monkeypatch.delenv("OAUTH_TOKEN_KEY", raising=False)
+
+    response = client.post("/tools/spotify/play", json={})
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
+
+
+def test_spotify_not_connected_returns_authorization_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.delenv("SPOTIFY_ACCESS_TOKEN", raising=False)
+
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "spotify_not_connected"
+    assert error["authorization_url"].startswith("https://accounts.spotify.com/authorize?")
+    assert error["state"]
+
+
+def test_spotify_refresh_failure_requires_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "spotify_default",
+        {
+            "access_token": "expired-token",
+            "refresh_token": "refresh-token",
+            "expiry": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "scopes": ["user-read-playback-state"],
+        },
+    )
+
+    def fail_refresh(*_args: object, **_kwargs: object) -> object:
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr("app.spotify_oauth.httpx.post", fail_refresh)
+
+    response = client.post("/tools/spotify/skip", json={})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "spotify_token_expired"
+    assert error["authorization_url"].startswith("https://accounts.spotify.com/authorize?")
+    assert error["state"]
 
 
 class FakeEventsList:
@@ -902,18 +964,18 @@ def test_notes_persist_to_disk(tmp_path: Path) -> None:
     assert data
 
 
-def test_spotify_requires_token() -> None:
-    response = client.post("/tools/spotify/pause", json={})
-    assert response.status_code == 500
-    assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
-
-
 def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
     class FakeResponse:
+        def __init__(self, payload: dict[str, object] | None = None) -> None:
+            self._payload = payload or {}
+
         def raise_for_status(self) -> None:
             return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
 
     def fake_request(
         method: str,
@@ -934,6 +996,8 @@ def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
                 "timeout": timeout,
             }
         )
+        if url.endswith("/me/player/devices"):
+            return FakeResponse({"devices": [{"id": "device123", "is_active": True, "type": "Computer"}]})
         return FakeResponse()
 
     monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
@@ -943,13 +1007,50 @@ def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
 
     response = client.post("/tools/spotify/pause", json={})
     assert response.status_code == 200
-    assert calls
-    first_call = calls[0]
-    assert first_call["method"] == "PUT"
-    assert first_call["url"] == "https://spotify.local/me/player/pause"
-    assert first_call["headers"] == {"Authorization": "Bearer token"}
-    assert first_call["params"] == {"device_id": "device123"}
-    assert first_call["json"] is None
+    assert len(calls) == 2
+    assert calls[0]["url"] == "https://spotify.local/me/player/devices"
+    second_call = calls[1]
+    assert second_call["method"] == "PUT"
+    assert second_call["url"] == "https://spotify.local/me/player/pause"
+    assert second_call["headers"] == {"Authorization": "Bearer token"}
+    assert second_call["params"] == {"device_id": "device123"}
+    assert second_call["json"] is None
+
+
+def test_spotify_pause_no_devices_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object] | None = None) -> None:
+            self._payload = payload or {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        json: dict[str, object] | None = None,
+        timeout: int | float | None = None,
+    ) -> FakeResponse:
+        calls.append({"method": method, "url": url, "params": params, "json": json})
+        return FakeResponse({"devices": []})
+
+    monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("SPOTIFY_BASE_URL", "https://spotify.local")
+    monkeypatch.delenv("SPOTIFY_DEVICE_ID", raising=False)
+    monkeypatch.setattr("app.spotify.httpx.request", fake_request)
+
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"]["code"] == "spotify_no_devices_available"
+    assert calls == [{"method": "GET", "url": "https://spotify.local/me/player/devices", "params": None, "json": None}]
 
 
 def test_spotify_pause_discovers_phone_device(monkeypatch: pytest.MonkeyPatch) -> None:
