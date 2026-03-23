@@ -113,6 +113,13 @@ _SPOTIFY_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
 
 
 # existing helper funcs preserved below ...
+def check_google_connection(
+    settings: Settings,
+    required_scopes: tuple[str, ...] | list[str],
+):
+    return ensure_google_ready(settings, required_scopes)
+
+
 def _parse_history(payload: dict[str, Any]) -> list[dict[str, str]]:
     history = payload.get("history")
     if not isinstance(history, list):
@@ -213,12 +220,13 @@ def _tool_not_ready_response(
     action: dict[str, Any],
     readiness: dict[str, Any],
 ) -> dict[str, Any]:
-    natural_response = response_text.strip() or str(readiness.get("message") or "A ferramenta precisa de conexão ou configuração antes de continuar.")
-    return {
-        "status": "tool_not_ready",
-    natural_response = response_text.strip() or readiness["explanation"]
+    natural_response = response_text.strip() or str(
+        readiness.get("message")
+        or readiness.get("explanation")
+        or "A ferramenta precisa de conexão ou configuração antes de continuar."
+    )
     result = {
-        "status": readiness["status"],
+        "status": "tool_not_ready",
         "response": natural_response,
         "action": action,
         "tool_readiness": readiness,
@@ -235,7 +243,7 @@ def _resolve_google_readiness(
     _payload: dict[str, Any],
 ) -> dict[str, Any]:
     required_scopes = _GOOGLE_TOOL_SCOPES.get(tool, ())
-    return ensure_google_ready(settings, required_scopes).to_response()
+    return check_google_connection(settings, required_scopes).to_response()
 
 
 def _resolve_spotify_readiness(
@@ -357,7 +365,7 @@ def resolve_action_readiness(
         return base_readiness
 
     missing_fields = _missing_required_fields(tool, payload)
-    if missing_fields:
+    if missing_fields and tool not in _CONFIRMATION_REQUIRED_TOOLS:
         missing_list = ", ".join(missing_fields)
         return _readiness_result(
             status="requires_clarification",
@@ -538,6 +546,19 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
             action=action,
             readiness=readiness,
         )
+
+    if isinstance(tool, str) and (tool.startswith("email.") or tool.startswith("calendar.")):
+        connection = _resolve_google_readiness(
+            settings,
+            tool,
+            action_payload if isinstance(action_payload, dict) else {},
+        )
+        if connection["status"] != "ready":
+            return _tool_not_ready_response(
+                response_text=response_text,
+                action=action,
+                readiness=connection,
+            )
 
     if tool == "email.search":
         tool_result = email_search(settings, action_payload)

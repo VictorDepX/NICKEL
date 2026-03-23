@@ -182,6 +182,33 @@ def test_spotify_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["code"] == "spotify_not_configured"
 
 
+def test_spotify_stored_token_remains_ready_without_oauth_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.delenv("SPOTIFY_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("SPOTIFY_REDIRECT_URI", raising=False)
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "spotify_default",
+        {
+            "access_token": "persisted-token",
+            "refresh_token": "refresh-token",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": ["user-read-playback-state", "user-modify-playback-state"],
+        },
+    )
+
+    readiness = spotify_oauth.ensure_spotify_ready(get_settings())
+
+    assert readiness.status == "ready"
+    assert readiness.code == "ready"
+    assert readiness.access_token == "persisted-token"
+
+
 def test_spotify_not_connected_returns_authorization_url(monkeypatch: pytest.MonkeyPatch) -> None:
     oauth._token_store = None
     spotify_oauth.spotify_state_store._states.clear()
