@@ -330,6 +330,38 @@ def test_handle_chat_returns_spotify_device_recovery_instead_of_handler_error(
     assert result["status"] == "tool_not_ready"
     assert result["tool_readiness"]["missing_factor"] == "spotify_playback_device"
 
+def test_resolve_spotify_readiness_converts_device_http_errors(monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(
+        "app.chat.check_spotify_playback_target",
+        lambda _settings: (_ for _ in ()).throw(
+            HTTPException(
+                status_code=409,
+                detail={
+                    "error": {
+                        "code": "spotify_no_devices_available",
+                        "message": "No Spotify playback devices are available.",
+                    }
+                },
+            )
+        ),
+    )
+
+    settings = _settings()
+    settings = Settings(**{**settings.__dict__, "spotify_access_token": "token"})
+
+    readiness = __import__("app.chat", fromlist=["_resolve_spotify_readiness"])._resolve_spotify_readiness(
+        settings,
+        "spotify.pause",
+        {},
+    )
+
+    assert readiness["status"] == "needs_external_activation"
+    assert readiness["missing_factor"] == "spotify_playback_device"
+    assert readiness["technical_details"] == "No Spotify playback devices are available."
+
+
 
 def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) -> None:
     def fake_generate_response(settings, message, forced_tool=None, history=None):
