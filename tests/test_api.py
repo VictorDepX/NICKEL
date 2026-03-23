@@ -116,12 +116,16 @@ def test_spotify_oauth_start(monkeypatch: pytest.MonkeyPatch) -> None:
     spotify_oauth.spotify_state_store._states.clear()
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
-    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv(
+        "SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback"
+    )
 
     response = client.get("/auth/spotify/start")
     body = response.json()
     assert response.status_code == 200
-    assert body["authorization_url"].startswith("https://accounts.spotify.com/authorize?")
+    assert body["authorization_url"].startswith(
+        "https://accounts.spotify.com/authorize?"
+    )
     assert body["state"]
 
 
@@ -130,7 +134,9 @@ def test_spotify_oauth_callback_stores_tokens(monkeypatch: pytest.MonkeyPatch) -
     spotify_oauth.spotify_state_store._states.clear()
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
-    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv(
+        "SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback"
+    )
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
 
     class FakeResponse:
@@ -145,7 +151,9 @@ def test_spotify_oauth_callback_stores_tokens(monkeypatch: pytest.MonkeyPatch) -
                 "scope": "user-read-playback-state user-modify-playback-state",
             }
 
-    monkeypatch.setattr("app.spotify_oauth.httpx.post", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.spotify_oauth.httpx.post", lambda *args, **kwargs: FakeResponse()
+    )
 
     start_response = client.get("/auth/spotify/start")
     state = start_response.json()["state"]
@@ -281,7 +289,9 @@ def test_calendar_list_events_returns_items(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
-    monkeypatch.setattr(calendar, "build", lambda *_args, **_kwargs: FakeCalendarService([{"id": "1"}]))
+    monkeypatch.setattr(
+        calendar, "build", lambda *_args, **_kwargs: FakeCalendarService([{"id": "1"}])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -294,7 +304,9 @@ def test_calendar_list_events_returns_items(monkeypatch: pytest.MonkeyPatch) -> 
         },
     )
 
-    response = client.post("/tools/calendar/list_events", json={"calendar_id": "primary"})
+    response = client.post(
+        "/tools/calendar/list_events", json={"calendar_id": "primary"}
+    )
     body = response.json()
     assert response.status_code == 200
     assert body["status"] == "ok"
@@ -319,7 +331,9 @@ def test_calendar_list_events_expired_token(monkeypatch: pytest.MonkeyPatch) -> 
         },
     )
 
-    response = client.post("/tools/calendar/list_events", json={"calendar_id": "primary"})
+    response = client.post(
+        "/tools/calendar/list_events", json={"calendar_id": "primary"}
+    )
     assert response.status_code == 401
     assert response.json()["detail"]["error"]["code"] == "needs_reauth"
 
@@ -362,13 +376,17 @@ def test_calendar_list_events_builds_request(monkeypatch: pytest.MonkeyPatch) ->
     }
 
 
-def test_calendar_create_event_after_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_calendar_create_event_after_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     oauth._token_store = None
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
-    monkeypatch.setattr(calendar, "build", lambda *_args, **_kwargs: FakeCalendarService([]))
+    monkeypatch.setattr(
+        calendar, "build", lambda *_args, **_kwargs: FakeCalendarService([])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -385,18 +403,24 @@ def test_calendar_create_event_after_confirmation(monkeypatch: pytest.MonkeyPatc
         "/tools/calendar/create_event",
         json={"calendar_id": "primary", "event": {"summary": "A"}},
     ).json()
-    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    response = client.post(
+        "/confirm", json={"action_id": pending["action_id"], "confirmed": True}
+    )
     assert response.status_code == 200
     assert response.json()["data"]["event"]["id"] == "created"
 
 
-def test_calendar_modify_event_after_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_calendar_modify_event_after_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     oauth._token_store = None
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
-    monkeypatch.setattr(calendar, "build", lambda *_args, **_kwargs: FakeCalendarService([]))
+    monkeypatch.setattr(
+        calendar, "build", lambda *_args, **_kwargs: FakeCalendarService([])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -413,7 +437,9 @@ def test_calendar_modify_event_after_confirmation(monkeypatch: pytest.MonkeyPatc
         "/tools/calendar/modify_event",
         json={"calendar_id": "primary", "event_id": "evt1", "event": {"summary": "B"}},
     ).json()
-    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    response = client.post(
+        "/confirm", json={"action_id": pending["action_id"], "confirmed": True}
+    )
     assert response.status_code == 200
     assert response.json()["data"]["event"]["id"] == "updated"
 
@@ -522,7 +548,9 @@ def test_email_search_returns_results(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
-    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService([{"id": "msg1"}]))
+    monkeypatch.setattr(
+        gmail, "build", lambda *_args, **_kwargs: FakeGmailService([{"id": "msg1"}])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -606,7 +634,9 @@ def test_email_read_returns_message(monkeypatch: pytest.MonkeyPatch) -> None:
         "id": "msg1",
         "payload": {"body": {"data": "aGVsbG8="}},
     }
-    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService([message]))
+    monkeypatch.setattr(
+        gmail, "build", lambda *_args, **_kwargs: FakeGmailService([message])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -655,7 +685,9 @@ def test_email_draft_creates_draft(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
-    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService([{"id": "msg1"}]))
+    monkeypatch.setattr(
+        gmail, "build", lambda *_args, **_kwargs: FakeGmailService([{"id": "msg1"}])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -679,7 +711,9 @@ def test_email_send_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
     monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
-    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService([{"id": "msg1"}]))
+    monkeypatch.setattr(
+        gmail, "build", lambda *_args, **_kwargs: FakeGmailService([{"id": "msg1"}])
+    )
 
     token_store = oauth.get_token_store(get_settings())
     token_store.store(
@@ -693,7 +727,9 @@ def test_email_send_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
     pending = client.post("/tools/email/send", json={"raw_base64": "aGVsbG8="}).json()
-    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    response = client.post(
+        "/confirm", json={"action_id": pending["action_id"], "confirmed": True}
+    )
     assert response.status_code == 200
     assert response.json()["data"]["message"]["id"] == "sent"
 
@@ -722,7 +758,9 @@ def test_confirm_requires_explicit_true(monkeypatch: pytest.MonkeyPatch) -> None
 def test_cancel_requires_explicit_true() -> None:
     response = client.post("/tools/tasks/create", json={"title": "Task"})
     action_id = response.json()["action_id"]
-    cancel_response = client.post("/cancel", json={"action_id": action_id, "confirmed": False})
+    cancel_response = client.post(
+        "/cancel", json={"action_id": action_id, "confirmed": False}
+    )
     assert cancel_response.status_code == 400
     assert cancel_response.json()["detail"]["error"]["code"] == "confirmation_required"
 
@@ -730,18 +768,25 @@ def test_cancel_requires_explicit_true() -> None:
 def test_confirm_executes_action_stub() -> None:
     response = client.post("/tools/notes/create", json={"body": "Note"})
     action_id = response.json()["action_id"]
-    confirm_response = client.post("/confirm", json={"action_id": action_id, "confirmed": True})
+    confirm_response = client.post(
+        "/confirm", json={"action_id": action_id, "confirmed": True}
+    )
     assert confirm_response.status_code == 200
     assert confirm_response.json()["data"]["note"]["body"] == "Note"
 
 
+def test_write_tool_does_not_execute_without_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
 def test_write_tool_does_not_execute_without_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
     store_google_token(monkeypatch)
     def _fail(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("write tool executed without confirmation")
 
     monkeypatch.setattr(calendar, "build", _fail)
-    response = client.post("/tools/calendar/create_event", json={"calendar_id": "primary"})
+    response = client.post(
+        "/tools/calendar/create_event", json={"calendar_id": "primary"}
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "pending_confirmation"
 
@@ -859,7 +904,9 @@ def test_responses_not_emotional_language() -> None:
     assert all(word not in text for word in forbidden)
 
 
-def test_token_store_persists_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_token_store_persists_to_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     oauth._token_store = None
     token_path = tmp_path / "tokens.json"
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
@@ -889,7 +936,9 @@ def test_token_store_persists_to_disk(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_pending_actions_persist_to_disk(tmp_path: Path) -> None:
     path = tmp_path / "pending.json"
     pending_actions.configure_pending_actions(path)
-    pending = pending_actions.require_confirmation("email.send", {"raw_base64": "aGVsbG8="})
+    pending = pending_actions.require_confirmation(
+        "email.send", {"raw_base64": "aGVsbG8="}
+    )
 
     pending_actions.configure_pending_actions(path)
     action = pending_actions.confirm_action(pending["action_id"], True)
@@ -899,7 +948,9 @@ def test_pending_actions_persist_to_disk(tmp_path: Path) -> None:
 def test_tasks_create_and_list(tmp_path: Path) -> None:
     configure_tasks_store(tmp_path / "tasks.json")
     pending = client.post("/tools/tasks/create", json={"title": "Task"}).json()
-    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    response = client.post(
+        "/confirm", json={"action_id": pending["action_id"], "confirmed": True}
+    )
     assert response.status_code == 200
     list_response = client.post("/tools/tasks/list", json={})
     assert list_response.status_code == 200
@@ -907,7 +958,9 @@ def test_tasks_create_and_list(tmp_path: Path) -> None:
     assert tasks and tasks[0]["title"] == "Task"
 
 
-def test_configure_stores_configures_each_store_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configure_stores_configures_each_store_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: dict[str, int] = {
         "pending": 0,
         "notes": 0,
@@ -916,17 +969,39 @@ def test_configure_stores_configures_each_store_once(monkeypatch: pytest.MonkeyP
         "audit": 0,
     }
 
-    monkeypatch.setattr(main_module, "configure_pending_actions", lambda _path: calls.__setitem__("pending", calls["pending"] + 1))
-    monkeypatch.setattr(main_module, "configure_notes_store", lambda _path: calls.__setitem__("notes", calls["notes"] + 1))
-    monkeypatch.setattr(main_module, "configure_tasks_store", lambda _path: calls.__setitem__("tasks", calls["tasks"] + 1))
-    monkeypatch.setattr(main_module, "configure_memory_store", lambda _path: calls.__setitem__("memory", calls["memory"] + 1))
-    monkeypatch.setattr(main_module, "configure_audit_store", lambda _path: calls.__setitem__("audit", calls["audit"] + 1))
+    monkeypatch.setattr(
+        main_module,
+        "configure_pending_actions",
+        lambda _path: calls.__setitem__("pending", calls["pending"] + 1),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "configure_notes_store",
+        lambda _path: calls.__setitem__("notes", calls["notes"] + 1),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "configure_tasks_store",
+        lambda _path: calls.__setitem__("tasks", calls["tasks"] + 1),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "configure_memory_store",
+        lambda _path: calls.__setitem__("memory", calls["memory"] + 1),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "configure_audit_store",
+        lambda _path: calls.__setitem__("audit", calls["audit"] + 1),
+    )
 
     main_module.configure_stores()
     assert calls == {"pending": 1, "notes": 1, "tasks": 1, "memory": 1, "audit": 1}
 
 
-def test_chat_plan_uses_first_llm_success_without_second_incompatible_call(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_plan_uses_first_llm_success_without_second_incompatible_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict[str, object]] = []
 
     class FakeLLMResponse:
@@ -940,7 +1015,9 @@ def test_chat_plan_uses_first_llm_success_without_second_incompatible_call(monke
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps({"response": "Plano pronto", "action": None})
+                            "content": json.dumps(
+                                {"response": "Plano pronto", "action": None}
+                            )
                         }
                     }
                 ]
@@ -965,7 +1042,9 @@ def test_chat_plan_uses_first_llm_success_without_second_incompatible_call(monke
     assert "tool_choice" not in sent_payload
 
 
-def test_chat_plan_sensitive_action_requires_confirmation_without_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_plan_sensitive_action_requires_confirmation_without_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def _fail(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("sensitive tool should not execute during planning")
 
@@ -980,6 +1059,16 @@ def test_chat_plan_sensitive_action_requires_confirmation_without_execution(monk
         },
     )
     monkeypatch.setattr("app.gmail.build", _fail)
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "tool": "email.send",
+            "explanation": "ready",
+            "technical_details": "ready",
+            "missing_factor": "none",
+        },
+    )
 
     response = client.post("/chat/plan", json={"message": "Envie este email"})
 
@@ -988,6 +1077,176 @@ def test_chat_plan_sensitive_action_requires_confirmation_without_execution(monk
     assert body["action"]["tool"] == "email.send"
     assert body["requires_confirmation"] is True
     assert body["response"] == "Posso enviar esse email assim que você confirmar."
+
+
+def test_chat_plan_returns_connection_instructions_for_google_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.chat.generate_response",
+        lambda *_args, **_kwargs: {
+            "response": "Posso consultar seu calendário quando a conexão estiver pronta.",
+            "action": {
+                "tool": "calendar.list_events",
+                "payload": {"calendar_id": "primary"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "needs_connection",
+            "tool": "calendar.list_events",
+            "explanation": "Conecte sua conta Google para continuar.",
+            "technical_details": "Nenhum token OAuth encontrado.",
+            "missing_factor": "google_account_connection",
+            "authorization_url": "https://example.com/oauth",
+            "state": "state-123",
+        },
+    )
+
+    response = client.post("/chat/plan", json={"message": "ver agenda"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tool_not_ready"
+    assert body["tool_readiness"]["status"] == "needs_connection"
+    assert body["tool_readiness"]["authorization_url"] == "https://example.com/oauth"
+
+
+def test_chat_plan_sensitive_tool_requires_ready_before_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.chat.generate_response",
+        lambda *_args, **_kwargs: {
+            "response": "Posso enviar depois que o Google estiver pronto.",
+            "action": {"tool": "email.send", "payload": {"to": "a@b.com"}},
+        },
+    )
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "needs_connection",
+            "tool": "email.send",
+            "explanation": "Conecte sua conta Google.",
+            "technical_details": "Nenhum token OAuth encontrado.",
+            "missing_factor": "google_account_connection",
+        },
+    )
+
+    blocked = client.post("/chat", json={"message": "envie este email"})
+    assert blocked.status_code == 200
+    blocked_body = blocked.json()
+    assert blocked_body["status"] == "tool_not_ready"
+    assert blocked_body["requires_confirmation"] is False
+    assert "pending_action" not in blocked_body
+
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "tool": "email.send",
+            "explanation": "ready",
+            "technical_details": "ready",
+            "missing_factor": "none",
+        },
+    )
+
+    ready = client.post("/chat", json={"message": "envie este email"})
+    assert ready.status_code == 200
+    ready_body = ready.json()
+    assert ready_body["status"] == "pending_confirmation"
+    assert ready_body["pending_action"]["tool"] == "email.send"
+
+
+def test_chat_execute_returns_spotify_device_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_pause(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(
+            "spotify handler should not execute when readiness is not ready"
+        )
+
+    monkeypatch.setattr("app.chat.spotify_pause", fail_pause)
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "needs_external_activation",
+            "tool": "spotify.pause",
+            "explanation": "Abra o Spotify em um device ativo.",
+            "technical_details": "Nenhum device encontrado.",
+            "missing_factor": "spotify_playback_device",
+        },
+    )
+
+    response = client.post(
+        "/chat/execute",
+        json={
+            "response": "Posso pausar",
+            "action": {"tool": "spotify.pause", "payload": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tool_not_ready"
+    assert body["tool_readiness"]["status"] == "needs_external_activation"
+    assert body["tool_readiness"]["missing_factor"] == "spotify_playback_device"
+
+
+def test_google_readiness_reports_missing_oauth_connection() -> None:
+    response = client.post(
+        "/chat/execute",
+        json={
+            "response": "Posso ler seus emails.",
+            "action": {"tool": "email.read", "payload": {"id": "msg1"}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tool_not_ready"
+    assert body["tool_readiness"]["status"] in {"needs_user_setup", "needs_connection"}
+
+
+def test_google_readiness_reports_missing_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oauth._token_store = None
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
+        },
+    )
+
+    response = client.post(
+        "/chat/execute",
+        json={
+            "response": "Posso criar o evento.",
+            "action": {
+                "tool": "calendar.create_event",
+                "payload": {"calendar_id": "primary", "event": {"summary": "Teste"}},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tool_not_ready"
+    assert body["tool_readiness"]["status"] == "needs_external_activation"
+    assert body["tool_readiness"]["missing_factor"] == "google_oauth_scopes"
+    assert body["tool_readiness"]["authorization_url"]
 
 
 def test_chat_returns_clarification_for_unsupported_llm_action_without_execution(
@@ -1020,31 +1279,44 @@ def test_chat_returns_clarification_for_unsupported_llm_action_without_execution
     assert body["fallback"] == "low_confidence_action"
     assert body["orchestration"]["llm_tool"] == "spotify.search"
 
-    audit_events = client.get("/audit", params={"tool": "orchestrator.low_confidence_action"})
+    audit_events = client.get(
+        "/audit", params={"tool": "orchestrator.low_confidence_action"}
+    )
     assert audit_events.status_code == 200
     events = audit_events.json()["data"]["events"]
     assert events
     latest_event = events[-1]
     assert latest_event["payload"]["llm_tool"] == "spotify.search"
-    assert latest_event["payload"]["decision_reason"] == "ambiguous_tool_match:spotify.pause,spotify.play"
+    assert (
+        latest_event["payload"]["decision_reason"]
+        == "ambiguous_tool_match:spotify.pause,spotify.play"
+    )
 
 
 def test_routes_call_underlying_handlers_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"tasks": 0, "play": 0, "pause": 0, "skip": 0, "audit": 0}
 
-    def fake_list_tasks(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+    def fake_list_tasks(
+        _settings: object, _payload: dict[str, object]
+    ) -> dict[str, object]:
         calls["tasks"] += 1
         return {"status": "ok", "data": {"tasks": []}}
 
-    def fake_spotify_play(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+    def fake_spotify_play(
+        _settings: object, _payload: dict[str, object]
+    ) -> dict[str, object]:
         calls["play"] += 1
         return {"status": "ok", "data": {}}
 
-    def fake_spotify_pause(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+    def fake_spotify_pause(
+        _settings: object, _payload: dict[str, object]
+    ) -> dict[str, object]:
         calls["pause"] += 1
         return {"status": "ok", "data": {}}
 
-    def fake_spotify_skip(_settings: object, _payload: dict[str, object]) -> dict[str, object]:
+    def fake_spotify_skip(
+        _settings: object, _payload: dict[str, object]
+    ) -> dict[str, object]:
         calls["skip"] += 1
         return {"status": "ok", "data": {}}
 
@@ -1071,7 +1343,9 @@ def test_notes_persist_to_disk(tmp_path: Path) -> None:
     path = tmp_path / "notes.json"
     configure_notes_store(path)
     pending = client.post("/tools/notes/create", json={"body": "Note body"}).json()
-    response = client.post("/confirm", json={"action_id": pending["action_id"], "confirmed": True})
+    response = client.post(
+        "/confirm", json={"action_id": pending["action_id"], "confirmed": True}
+    )
     assert response.status_code == 200
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data
@@ -1222,10 +1496,14 @@ def test_spotify_pause_discovers_phone_device(monkeypatch: pytest.MonkeyPatch) -
 
 def test_memory_flow(tmp_path: Path) -> None:
     configure_memory_store(tmp_path / "memory.json")
-    propose = client.post("/memory/ask", json={"key": "timezone", "value": "America/Sao_Paulo"})
+    propose = client.post(
+        "/memory/ask", json={"key": "timezone", "value": "America/Sao_Paulo"}
+    )
     assert propose.status_code == 200
     memory_id = propose.json()["memory_id"]
-    confirm = client.post("/memory/confirm", json={"memory_id": memory_id, "confirmed": True})
+    confirm = client.post(
+        "/memory/confirm", json={"memory_id": memory_id, "confirmed": True}
+    )
     assert confirm.status_code == 200
     listing = client.get("/memory")
     assert listing.status_code == 200
