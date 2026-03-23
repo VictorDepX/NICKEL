@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from app.config import Settings
-from app.oauth import require_google_connection
+from app.oauth import ensure_google_ready, require_google_connection
 
 GMAIL_READ_SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -43,7 +43,17 @@ def _handle_http_error(exc: HttpError, code: str, message: str) -> HTTPException
     )
 
 
+def _google_not_ready_response(settings: Settings, required_scopes: tuple[str, ...]) -> dict[str, Any] | None:
+    check = ensure_google_ready(settings, required_scopes)
+    if check.status == "ready":
+        return None
+    return check.to_response()
+
+
 def search(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, GMAIL_READ_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, GMAIL_READ_SCOPES)
     query = payload.get("query", "")
     max_results = payload.get("max_results", 10)
@@ -70,6 +80,9 @@ def search(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def read(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, GMAIL_READ_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, GMAIL_READ_SCOPES)
     user_id = payload.get("user_id", "me")
     message_id = payload.get("message_id")
@@ -137,6 +150,9 @@ def _require_raw_message(payload: dict[str, Any]) -> str:
 
 
 def draft(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, GMAIL_COMPOSE_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, GMAIL_COMPOSE_SCOPES)
     user_id = payload.get("user_id", "me")
     raw = _require_raw_message(payload)
@@ -161,6 +177,9 @@ def draft(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def send(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, GMAIL_COMPOSE_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, GMAIL_COMPOSE_SCOPES)
     user_id = payload.get("user_id", "me")
     raw = _require_raw_message(payload)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from typing import Any, Literal
@@ -16,7 +16,7 @@ SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_TOKEN_STORE_KEY = "spotify_default"
 SpotifyConnectionStatus = Literal[
-    "ready", "needs_configuration", "needs_connection", "needs_reauth"
+    "ready", "needs_configuration", "needs_connection", "token_expired"
 ]
 
 
@@ -29,11 +29,16 @@ class SpotifyOAuthSession:
 @dataclass
 class SpotifyConnectionCheck:
     status: SpotifyConnectionStatus
+    service: str = "spotify"
     access_token: str | None = None
     authorization_url: str | None = None
     state: str | None = None
-    error_code: str | None = None
+    code: str | None = None
     message: str | None = None
+    missing_config: list[str] | None = None
+
+    def to_response(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class SpotifyStateStore:
@@ -51,6 +56,19 @@ class SpotifyStateStore:
 
 
 spotify_state_store = SpotifyStateStore()
+
+
+def _missing_spotify_config(settings: Settings) -> list[str]:
+    missing: list[str] = []
+    if not settings.oauth_token_key and not settings.spotify_access_token:
+        missing.append("OAUTH_TOKEN_KEY")
+    if not settings.spotify_client_id and not settings.spotify_access_token:
+        missing.append("SPOTIFY_CLIENT_ID")
+    if not settings.spotify_client_secret and not settings.spotify_access_token:
+        missing.append("SPOTIFY_CLIENT_SECRET")
+    if not settings.spotify_redirect_uri and not settings.spotify_access_token:
+        missing.append("SPOTIFY_REDIRECT_URI")
+    return missing
 
 
 def _has_oauth_client_config(settings: Settings) -> bool:
@@ -198,32 +216,34 @@ def _refresh_spotify_token(settings: Settings, refresh_token: str) -> dict[str, 
     return token_store.get(SPOTIFY_TOKEN_STORE_KEY) or {}
 
 
-def check_spotify_connection(settings: Settings) -> SpotifyConnectionCheck:
+def ensure_spotify_ready(settings: Settings) -> SpotifyConnectionCheck:
     if settings.spotify_access_token:
-        return SpotifyConnectionCheck(status="ready", access_token=settings.spotify_access_token)
+        return SpotifyConnectionCheck(
+            status="ready",
+            code="ready",
+            message="Spotify connection is ready.",
+            access_token=settings.spotify_access_token,
+        )
 
+    missing_config = _missing_spotify_config(settings)
     authorization_details = _authorization_details(settings)
-    try:
-        token_store = get_token_store(settings)
-    except HTTPException as exc:
-        if exc.status_code == 500 and exc.detail["error"]["code"] == "oauth_not_configured":
-            return SpotifyConnectionCheck(
-                status="needs_configuration",
-                error_code="spotify_not_configured",
-                message=(
-                    "Configure Spotify OAuth credentials or provide SPOTIFY_ACCESS_TOKEN."
-                ),
-                authorization_url=authorization_details and authorization_details["authorization_url"],
-                state=authorization_details and authorization_details["state"],
-            )
-        raise
+    if missing_config:
+        return SpotifyConnectionCheck(
+            status="needs_configuration",
+            code="spotify_not_configured",
+            message="Spotify credentials are missing on the server.",
+            missing_config=missing_config,
+            authorization_url=authorization_details and authorization_details["authorization_url"],
+            state=authorization_details and authorization_details["state"],
+        )
 
+    token_store = get_token_store(settings)
     token = token_store.get(SPOTIFY_TOKEN_STORE_KEY)
     if not token:
         return SpotifyConnectionCheck(
             status="needs_connection",
-            error_code="spotify_not_connected",
-            message="Spotify OAuth tokens not found.",
+            code="spotify_not_connected",
+            message="Connect your Spotify account to continue.",
             authorization_url=authorization_details and authorization_details["authorization_url"],
             state=authorization_details and authorization_details["state"],
         )
@@ -232,26 +252,33 @@ def check_spotify_connection(settings: Settings) -> SpotifyConnectionCheck:
         refresh_token = token.get("refresh_token")
         if not refresh_token:
             return SpotifyConnectionCheck(
-                status="needs_reauth",
-                error_code="spotify_token_expired",
-                message=(
-                    "Spotify access token expired and no refresh token is available."
-                ),
+                status="token_expired",
+                code="spotify_token_expired",
+                message="Spotify token expired and no refresh token is available.",
                 authorization_url=authorization_details and authorization_details["authorization_url"],
                 state=authorization_details and authorization_details["state"],
             )
         if not _has_oauth_client_config(settings):
             return SpotifyConnectionCheck(
-                status="needs_reauth",
-                error_code="spotify_oauth_not_configured",
+                status="needs_configuration",
+                code="spotify_oauth_not_configured",
                 message="Spotify OAuth client credentials are missing for token refresh.",
+                missing_config=[
+                    name
+                    for name, value in (
+                        ("SPOTIFY_CLIENT_ID", settings.spotify_client_id),
+                        ("SPOTIFY_CLIENT_SECRET", settings.spotify_client_secret),
+                        ("SPOTIFY_REDIRECT_URI", settings.spotify_redirect_uri),
+                    )
+                    if not value
+                ],
             )
         try:
             token = _refresh_spotify_token(settings, str(refresh_token))
         except (httpx.HTTPError, ValueError):
             return SpotifyConnectionCheck(
-                status="needs_reauth",
-                error_code="spotify_token_expired",
+                status="token_expired",
+                code="spotify_token_expired",
                 message="Failed to refresh Spotify access token.",
                 authorization_url=authorization_details and authorization_details["authorization_url"],
                 state=authorization_details and authorization_details["state"],
@@ -261,28 +288,27 @@ def check_spotify_connection(settings: Settings) -> SpotifyConnectionCheck:
     if not access_token:
         return SpotifyConnectionCheck(
             status="needs_connection",
-            error_code="spotify_not_connected",
+            code="spotify_not_connected",
             message="Spotify access token is unavailable.",
             authorization_url=authorization_details and authorization_details["authorization_url"],
             state=authorization_details and authorization_details["state"],
         )
-    return SpotifyConnectionCheck(status="ready", access_token=str(access_token))
+    return SpotifyConnectionCheck(
+        status="ready",
+        code="ready",
+        message="Spotify connection is ready.",
+        access_token=str(access_token),
+    )
+
+
+def check_spotify_connection(settings: Settings) -> SpotifyConnectionCheck:
+    return ensure_spotify_ready(settings)
 
 
 def get_spotify_access_token(settings: Settings) -> str:
-    connection = check_spotify_connection(settings)
+    connection = ensure_spotify_ready(settings)
     if connection.status == "ready" and connection.access_token:
         return connection.access_token
 
     status_code = 500 if connection.status == "needs_configuration" else 401
-    detail: dict[str, Any] = {
-        "error": {
-            "code": connection.error_code or "spotify_not_ready",
-            "message": connection.message or "Spotify integration is not ready.",
-        }
-    }
-    if connection.authorization_url:
-        detail["error"]["authorization_url"] = connection.authorization_url
-    if connection.state:
-        detail["error"]["state"] = connection.state
-    raise HTTPException(status_code=status_code, detail=detail)
+    raise HTTPException(status_code=status_code, detail={"error": connection.to_response()})

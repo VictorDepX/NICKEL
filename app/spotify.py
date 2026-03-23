@@ -7,16 +7,33 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import Settings
-from app.spotify_oauth import check_spotify_connection
+from app.spotify_oauth import ensure_spotify_ready
 
 
 @dataclass
 class SpotifyPlaybackTargetCheck:
     status: str
-    access_token: str
-    base_url: str
+    access_token: str | None = None
+    base_url: str | None = None
     device_id: str | None = None
     devices: list[dict[str, Any]] | None = None
+    service: str = "spotify"
+    code: str | None = None
+    message: str | None = None
+    authorization_url: str | None = None
+    state: str | None = None
+
+    def to_response(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "service": self.service,
+            "code": self.code,
+            "message": self.message,
+            "authorization_url": self.authorization_url,
+            "state": self.state,
+            "device_id": self.device_id,
+            "devices": self.devices,
+        }
 
 
 def _base_url(settings: Settings) -> str:
@@ -97,35 +114,31 @@ def _select_device_id(devices: list[dict[str, Any]]) -> str | None:
     return None
 
 
-def check_spotify_playback_target(settings: Settings) -> SpotifyPlaybackTargetCheck:
-    connection = check_spotify_connection(settings)
+def ensure_spotify_playback_ready(settings: Settings) -> SpotifyPlaybackTargetCheck:
+    connection = ensure_spotify_ready(settings)
     if connection.status != "ready" or not connection.access_token:
-        status_code = 500 if connection.status == "needs_configuration" else 401
-        detail: dict[str, Any] = {
-            "error": {
-                "code": connection.error_code or "spotify_not_ready",
-                "message": connection.message or "Spotify integration is not ready.",
-            }
-        }
-        if connection.authorization_url:
-            detail["error"]["authorization_url"] = connection.authorization_url
-        if connection.state:
-            detail["error"]["state"] = connection.state
-        raise HTTPException(status_code=status_code, detail=detail)
+        return SpotifyPlaybackTargetCheck(
+            status=connection.status,
+            access_token=None,
+            base_url=_base_url(settings),
+            code=connection.code,
+            message=connection.message,
+            authorization_url=connection.authorization_url,
+            state=connection.state,
+        )
 
     base_url = _base_url(settings)
     if settings.spotify_device_id:
         devices = _fetch_devices(connection.access_token, base_url)
         configured = next((device for device in devices if device.get("id") == settings.spotify_device_id), None)
         if configured is None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": {
-                        "code": "spotify_device_not_configured",
-                        "message": "The configured Spotify device was not found. Open Spotify on the target device and make sure it appears in the device list.",
-                    }
-                },
+            return SpotifyPlaybackTargetCheck(
+                status="needs_device",
+                access_token=connection.access_token,
+                base_url=base_url,
+                code="spotify_device_not_configured",
+                message="The configured Spotify device was not found. Open Spotify on the target device and try again.",
+                devices=devices,
             )
         return SpotifyPlaybackTargetCheck(
             status="ready",
@@ -133,29 +146,29 @@ def check_spotify_playback_target(settings: Settings) -> SpotifyPlaybackTargetCh
             base_url=base_url,
             device_id=settings.spotify_device_id,
             devices=devices,
+            code="ready",
+            message="Spotify playback is ready.",
         )
 
     devices = _fetch_devices(connection.access_token, base_url)
     if not devices:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": {
-                    "code": "spotify_no_devices_available",
-                    "message": "No Spotify playback devices are available. Open Spotify on a phone, desktop app, web player, or speaker and try again.",
-                }
-            },
+        return SpotifyPlaybackTargetCheck(
+            status="needs_device",
+            access_token=connection.access_token,
+            base_url=base_url,
+            code="spotify_no_active_device",
+            message="No Spotify playback device is available. Open Spotify on a device and try again.",
+            devices=[],
         )
     device_id = _select_device_id(devices)
     if not device_id:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": {
-                    "code": "spotify_no_active_device",
-                    "message": "Spotify found devices but none is ready for playback. Open Spotify on a compatible device and start playback once before retrying.",
-                }
-            },
+        return SpotifyPlaybackTargetCheck(
+            status="needs_device",
+            access_token=connection.access_token,
+            base_url=base_url,
+            code="spotify_no_active_device",
+            message="Spotify found devices but none is ready for playback yet.",
+            devices=devices,
         )
     return SpotifyPlaybackTargetCheck(
         status="ready",
@@ -163,7 +176,13 @@ def check_spotify_playback_target(settings: Settings) -> SpotifyPlaybackTargetCh
         base_url=base_url,
         device_id=device_id,
         devices=devices,
+        code="ready",
+        message="Spotify playback is ready.",
     )
+
+
+def check_spotify_playback_target(settings: Settings) -> SpotifyPlaybackTargetCheck:
+    return ensure_spotify_playback_ready(settings)
 
 
 def _spotify_request(
@@ -197,7 +216,9 @@ def _spotify_request(
 
 
 def play(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    target = check_spotify_playback_target(settings)
+    target = ensure_spotify_playback_ready(settings)
+    if target.status != "ready" or not target.access_token or not target.base_url:
+        return target.to_response()
     body: dict[str, Any] = {}
     for key in ("context_uri", "uris", "offset", "position_ms"):
         if key in payload:
@@ -214,7 +235,9 @@ def play(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def pause(settings: Settings, _payload: dict[str, Any]) -> dict[str, Any]:
-    target = check_spotify_playback_target(settings)
+    target = ensure_spotify_playback_ready(settings)
+    if target.status != "ready" or not target.access_token or not target.base_url:
+        return target.to_response()
     _spotify_request(
         target.access_token,
         target.base_url,
@@ -226,7 +249,9 @@ def pause(settings: Settings, _payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def skip(settings: Settings, _payload: dict[str, Any]) -> dict[str, Any]:
-    target = check_spotify_playback_target(settings)
+    target = ensure_spotify_playback_ready(settings)
+    if target.status != "ready" or not target.access_token or not target.base_url:
+        return target.to_response()
     _spotify_request(
         target.access_token,
         target.base_url,

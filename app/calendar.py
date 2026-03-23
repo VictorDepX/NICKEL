@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from app.config import Settings
-from app.oauth import require_google_connection
+from app.oauth import ensure_google_ready, require_google_connection
 
 CALENDAR_READ_SCOPES = (
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -41,7 +41,17 @@ def _handle_http_error(exc: HttpError, code: str, message: str) -> HTTPException
     )
 
 
+def _google_not_ready_response(settings: Settings, required_scopes: tuple[str, ...]) -> dict[str, Any] | None:
+    check = ensure_google_ready(settings, required_scopes)
+    if check.status == "ready":
+        return None
+    return check.to_response()
+
+
 def list_events(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, CALENDAR_READ_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, CALENDAR_READ_SCOPES)
     calendar_id = payload.get("calendar_id", "primary")
     max_results = payload.get("max_results", 10)
@@ -78,6 +88,9 @@ def list_events(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, CALENDAR_WRITE_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, CALENDAR_WRITE_SCOPES)
     calendar_id = payload.get("calendar_id")
     event = payload.get("event")
@@ -127,6 +140,9 @@ def create_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def modify_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _google_not_ready_response(settings, CALENDAR_WRITE_SCOPES)
+    if readiness is not None:
+        return readiness
     credentials = require_google_connection(settings, CALENDAR_WRITE_SCOPES)
     calendar_id = payload.get("calendar_id")
     event_id = payload.get("event_id")
