@@ -12,9 +12,8 @@ from app.gmail import read as email_read
 from app.gmail import read_latest as email_read_latest
 from app.gmail import search as email_search
 from app.llm import generate_response
-from app.oauth import get_token_store, start_oauth
 from app.orchestrator import decide_tool, is_high_confidence
-from app.oauth import check_google_connection
+from app.oauth import ensure_google_ready
 from app.pending_actions import require_confirmation
 from app.spotify import (
     check_spotify_playback_target,
@@ -27,8 +26,11 @@ from app.tasks import list_tasks
 
 ReadinessStatus = Literal[
     "ready",
-    "needs_user_setup",
+    "needs_configuration",
     "needs_connection",
+    "token_expired",
+    "insufficient_scopes",
+    "needs_device",
     "needs_external_activation",
     "blocked",
     "requires_clarification",
@@ -63,21 +65,8 @@ GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _google_preflight_response(settings: Settings, tool: str) -> dict[str, Any] | None:
-    required_scopes = GOOGLE_TOOL_SCOPES.get(tool)
-    if required_scopes is None:
-        return None
-    check = check_google_connection(settings, required_scopes)
-    if check.status == "ready":
-        return None
-    return {
-        "status": check.status,
-        "response": "A conexão com Google Workspace precisa de atenção antes de continuar.",
-        "tool": tool,
-        "google_connection": check.to_response(),
-    }
-
 _CONFIRMATION_REQUIRED_TOOLS = {
+
     "email.send",
     "calendar.create_event",
     "calendar.modify_event",
@@ -224,6 +213,9 @@ def _tool_not_ready_response(
     action: dict[str, Any],
     readiness: dict[str, Any],
 ) -> dict[str, Any]:
+    natural_response = response_text.strip() or str(readiness.get("message") or "A ferramenta precisa de conexão ou configuração antes de continuar.")
+    return {
+        "status": "tool_not_ready",
     natural_response = response_text.strip() or readiness["explanation"]
     result = {
         "status": readiness["status"],
@@ -243,62 +235,7 @@ def _resolve_google_readiness(
     _payload: dict[str, Any],
 ) -> dict[str, Any]:
     required_scopes = _GOOGLE_TOOL_SCOPES.get(tool, ())
-    if (
-        not settings.google_client_id
-        or not settings.google_client_secret
-        or not settings.google_redirect_uri
-    ):
-        return _readiness_result(
-            status="needs_user_setup",
-            tool=tool,
-            explanation="A integração com Google ainda não foi configurada neste ambiente.",
-            technical_details="Google OAuth client_id/client_secret/redirect_uri ausentes.",
-            missing_factor="google_oauth_configuration",
-        )
-    if not settings.oauth_token_key:
-        return _readiness_result(
-            status="needs_user_setup",
-            tool=tool,
-            explanation="O armazenamento seguro de tokens OAuth ainda não foi configurado.",
-            technical_details="OAUTH_TOKEN_KEY ausente para persistir tokens do Google.",
-            missing_factor="oauth_token_storage",
-        )
-
-    token_store = get_token_store(settings)
-    token = token_store.get("default")
-    if not token:
-        session = start_oauth(settings)
-        return _readiness_result(
-            status="needs_connection",
-            tool=tool,
-            explanation="Preciso conectar sua conta Google antes de usar essa ferramenta.",
-            technical_details="Nenhum token OAuth do Google foi encontrado para o usuário padrão.",
-            missing_factor="google_account_connection",
-            authorization_url=session.authorization_url,
-            state=session.state,
-        )
-
-    granted_scopes = set(token.get("scopes") or [])
-    missing_scopes = [scope for scope in required_scopes if scope not in granted_scopes]
-    if missing_scopes:
-        session = start_oauth(settings)
-        return _readiness_result(
-            status="needs_external_activation",
-            tool=tool,
-            explanation="Sua conexão Google existe, mas faltam permissões para concluir essa ação.",
-            technical_details=f"Scopes ausentes: {', '.join(missing_scopes)}.",
-            missing_factor="google_oauth_scopes",
-            authorization_url=session.authorization_url,
-            state=session.state,
-        )
-
-    return _readiness_result(
-        status="ready",
-        tool=tool,
-        explanation="Tool pronta para execução.",
-        technical_details="Pré-requisitos do Google atendidos.",
-        missing_factor="none",
-    )
+    return ensure_google_ready(settings, required_scopes).to_response()
 
 
 def _resolve_spotify_readiness(
@@ -388,13 +325,7 @@ def resolve_tool_readiness(
         return _resolve_google_readiness(settings, tool, payload)
     if tool.startswith("spotify."):
         return _resolve_spotify_readiness(settings, tool, payload)
-    return _readiness_result(
-        status="ready",
-        tool=tool,
-        explanation="Tool pronta para execução.",
-        technical_details="Nenhum pré-requisito externo adicional exigido.",
-        missing_factor="none",
-    )
+    return {"status": "ready", "tool": tool}
 
 
 def _missing_required_fields(tool: str, payload: dict[str, Any]) -> list[str]:
@@ -608,10 +539,6 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
             readiness=readiness,
         )
 
-
-    preflight_response = _google_preflight_response(settings, str(tool)) if tool else None
-    if preflight_response is not None:
-        return preflight_response
     if tool == "email.search":
         tool_result = email_search(settings, action_payload)
         return {"status": "ok", "response": response_text, "tool_result": tool_result}

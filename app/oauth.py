@@ -24,6 +24,9 @@ class OAuthSession:
 @dataclass
 class GoogleConnectionCheck:
     status: str
+    service: str = "google"
+    code: str | None = None
+    message: str | None = None
     authorization_url: str | None = None
     state: str | None = None
     missing_config: list[str] | None = None
@@ -111,7 +114,6 @@ _token_store: TokenStore | None = None
 state_store = StateStore()
 
 
-
 def _missing_google_config(settings: Settings) -> list[str]:
     missing: list[str] = []
     if not settings.google_client_id:
@@ -123,7 +125,6 @@ def _missing_google_config(settings: Settings) -> list[str]:
     if not settings.oauth_token_key:
         missing.append("OAUTH_TOKEN_KEY")
     return missing
-
 
 
 def build_flow(settings: Settings, scopes: tuple[str, ...] | list[str] | None = None) -> Flow:
@@ -157,7 +158,6 @@ def build_flow(settings: Settings, scopes: tuple[str, ...] | list[str] | None = 
     return flow
 
 
-
 def get_token_store(settings: Settings) -> TokenStore:
     if not settings.oauth_token_key:
         raise HTTPException(
@@ -176,7 +176,6 @@ def get_token_store(settings: Settings) -> TokenStore:
     return _token_store
 
 
-
 def start_oauth(settings: Settings, scopes: tuple[str, ...] | list[str] | None = None) -> OAuthSession:
     flow = build_flow(settings, scopes=scopes) if scopes is not None else build_flow(settings)
     authorization_url, state = flow.authorization_url(
@@ -186,7 +185,6 @@ def start_oauth(settings: Settings, scopes: tuple[str, ...] | list[str] | None =
     )
     state_store.add(state)
     return OAuthSession(state=state, authorization_url=authorization_url)
-
 
 
 def exchange_code(settings: Settings, code: str, state: str) -> dict[str, Any]:
@@ -215,7 +213,6 @@ def exchange_code(settings: Settings, code: str, state: str) -> dict[str, Any]:
     return {"status": "connected"}
 
 
-
 def _build_credentials(settings: Settings, token: dict[str, Any]) -> Credentials:
     expiry_value = token.get("expiry")
     expiry = datetime.fromisoformat(expiry_value) if expiry_value else None
@@ -232,8 +229,7 @@ def _build_credentials(settings: Settings, token: dict[str, Any]) -> Credentials
     )
 
 
-
-def check_google_connection(
+def ensure_google_ready(
     settings: Settings,
     required_scopes: tuple[str, ...] | list[str],
 ) -> GoogleConnectionCheck:
@@ -242,6 +238,8 @@ def check_google_connection(
     if missing_config:
         return GoogleConnectionCheck(
             status="needs_configuration",
+            code="google_not_configured",
+            message="Google OAuth credentials are missing on the server.",
             missing_config=missing_config,
             missing_scopes=required or None,
         )
@@ -252,6 +250,8 @@ def check_google_connection(
         session = start_oauth(settings, scopes=required)
         return GoogleConnectionCheck(
             status="needs_connection",
+            code="google_not_connected",
+            message="Connect your Google account to continue.",
             authorization_url=session.authorization_url,
             state=session.state,
             missing_scopes=required or None,
@@ -262,7 +262,9 @@ def check_google_connection(
         if not credentials.refresh_token:
             session = start_oauth(settings, scopes=required)
             return GoogleConnectionCheck(
-                status="needs_reauth",
+                status="token_expired",
+                code="google_token_expired",
+                message="Your Google token expired and no refresh token is available.",
                 authorization_url=session.authorization_url,
                 state=session.state,
                 missing_scopes=required or None,
@@ -272,7 +274,9 @@ def check_google_connection(
         except Exception:
             session = start_oauth(settings, scopes=required)
             return GoogleConnectionCheck(
-                status="needs_reauth",
+                status="token_expired",
+                code="google_token_expired",
+                message="Google token refresh failed. Reconnect your account.",
                 authorization_url=session.authorization_url,
                 state=session.state,
                 missing_scopes=required or None,
@@ -293,35 +297,37 @@ def check_google_connection(
         requested_scopes = tuple(dict.fromkeys([*settings.google_scopes, *required]))
         session = start_oauth(settings, scopes=requested_scopes)
         return GoogleConnectionCheck(
-            status="missing_scopes",
+            status="insufficient_scopes",
+            code="google_insufficient_scopes",
+            message="Your Google connection is missing required permissions.",
             authorization_url=session.authorization_url,
             state=session.state,
             missing_scopes=missing_scopes,
         )
 
-    return GoogleConnectionCheck(status="ready", credentials=credentials)
-
+    return GoogleConnectionCheck(
+        status="ready",
+        code="ready",
+        message="Google connection is ready.",
+        credentials=credentials,
+    )
 
 
 def require_google_connection(
     settings: Settings,
     required_scopes: tuple[str, ...] | list[str],
 ) -> Credentials:
-    check = check_google_connection(settings, required_scopes)
+    check = ensure_google_ready(settings, required_scopes)
     if check.status == "ready" and check.credentials is not None:
         return check.credentials
     raise HTTPException(
         status_code=401 if check.status != "needs_configuration" else 500,
-        detail={
-            "error": {
-                "code": check.status,
-                "message": "Google Workspace connection is not ready.",
-                **check.to_response(),
-            }
-        },
+        detail={"error": check.to_response()},
     )
-
 
 
 def get_credentials(settings: Settings) -> Credentials:
     return require_google_connection(settings, settings.google_scopes)
+
+
+check_google_connection = ensure_google_ready
