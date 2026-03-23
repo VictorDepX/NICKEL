@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -15,7 +16,7 @@ from app.notes import configure_notes_store
 from app.audit import configure_audit_store
 from app.memory import configure_memory_store
 from app.tasks import configure_tasks_store
-from app.config import get_settings
+from app.config import DEFAULT_SCOPES, get_settings
 import app.main as main_module
 from app.main import app
 
@@ -41,6 +42,35 @@ class FakeFlow:
 
     def fetch_token(self, code: str) -> None:
         self.credentials.token = f"access-{code}"
+
+
+def configure_google_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+
+
+def store_google_token(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    access_token: str = "access",
+    refresh_token: str | None = "refresh",
+    expiry: datetime | None = None,
+    scopes: list[str] | None = None,
+) -> None:
+    oauth._token_store = None
+    configure_google_env(monkeypatch)
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expiry": (expiry or (datetime.now(timezone.utc) + timedelta(hours=1))).isoformat(),
+            "scopes": scopes or list(DEFAULT_SCOPES),
+        },
+    )
 
 
 def test_health() -> None:
@@ -137,6 +167,67 @@ def test_spotify_oauth_callback_stores_tokens(monkeypatch: pytest.MonkeyPatch) -
     assert token["access_token"] == "spotify-access"
 
 
+def test_spotify_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    monkeypatch.delenv("SPOTIFY_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SPOTIFY_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("SPOTIFY_REDIRECT_URI", raising=False)
+    monkeypatch.delenv("OAUTH_TOKEN_KEY", raising=False)
+
+    response = client.post("/tools/spotify/play", json={})
+    assert response.status_code == 500
+    assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
+
+
+def test_spotify_not_connected_returns_authorization_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.delenv("SPOTIFY_ACCESS_TOKEN", raising=False)
+
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "spotify_not_connected"
+    assert error["authorization_url"].startswith("https://accounts.spotify.com/authorize?")
+    assert error["state"]
+
+
+def test_spotify_refresh_failure_requires_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    spotify_oauth.spotify_state_store._states.clear()
+    monkeypatch.setenv("SPOTIFY_CLIENT_ID", "spotify-client")
+    monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "spotify-secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/spotify/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "spotify_default",
+        {
+            "access_token": "expired-token",
+            "refresh_token": "refresh-token",
+            "expiry": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "scopes": ["user-read-playback-state"],
+        },
+    )
+
+    def fail_refresh(*_args: object, **_kwargs: object) -> object:
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr("app.spotify_oauth.httpx.post", fail_refresh)
+
+    response = client.post("/tools/spotify/skip", json={})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "spotify_token_expired"
+    assert error["authorization_url"].startswith("https://accounts.spotify.com/authorize?")
+    assert error["state"]
+
+
 class FakeEventsList:
     def __init__(self, events: list[dict[str, str]]) -> None:
         self._events = events
@@ -209,7 +300,7 @@ def test_calendar_list_events_returns_items(monkeypatch: pytest.MonkeyPatch) -> 
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -236,7 +327,7 @@ def test_calendar_list_events_expired_token(monkeypatch: pytest.MonkeyPatch) -> 
             "access_token": "access",
             "refresh_token": None,
             "expiry": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -244,7 +335,7 @@ def test_calendar_list_events_expired_token(monkeypatch: pytest.MonkeyPatch) -> 
         "/tools/calendar/list_events", json={"calendar_id": "primary"}
     )
     assert response.status_code == 401
-    assert response.json()["detail"]["error"]["code"] == "token_expired"
+    assert response.json()["detail"]["error"]["code"] == "needs_reauth"
 
 
 def test_calendar_list_events_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,7 +354,7 @@ def test_calendar_list_events_builds_request(monkeypatch: pytest.MonkeyPatch) ->
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -304,7 +395,7 @@ def test_calendar_create_event_after_confirmation(
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -338,7 +429,7 @@ def test_calendar_modify_event_after_confirmation(
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -468,7 +559,7 @@ def test_email_search_returns_results(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -493,7 +584,7 @@ def test_email_search_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -523,7 +614,7 @@ def test_email_read_requires_message_id(monkeypatch: pytest.MonkeyPatch) -> None
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -554,7 +645,7 @@ def test_email_read_returns_message(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -579,7 +670,7 @@ def test_email_draft_requires_raw_base64(monkeypatch: pytest.MonkeyPatch) -> Non
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -605,7 +696,7 @@ def test_email_draft_creates_draft(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -631,7 +722,7 @@ def test_email_send_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> No
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -643,7 +734,8 @@ def test_email_send_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> No
     assert response.json()["data"]["message"]["id"] == "sent"
 
 
-def test_write_tool_creates_pending_action() -> None:
+def test_write_tool_creates_pending_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(monkeypatch)
     response = client.post("/tools/email/send", json={"to": "user@example.com"})
     body = response.json()
     assert response.status_code == 200
@@ -652,7 +744,8 @@ def test_write_tool_creates_pending_action() -> None:
     assert "action_id" in body
 
 
-def test_confirm_requires_explicit_true() -> None:
+def test_confirm_requires_explicit_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(monkeypatch)
     response = client.post("/tools/calendar/create_event", json={"title": "A"})
     action_id = response.json()["action_id"]
     confirm_response = client.post(
@@ -685,6 +778,8 @@ def test_confirm_executes_action_stub() -> None:
 def test_write_tool_does_not_execute_without_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+def test_write_tool_does_not_execute_without_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(monkeypatch)
     def _fail(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("write tool executed without confirmation")
 
@@ -712,13 +807,94 @@ def test_no_pending_action_for_read_tools(monkeypatch: pytest.MonkeyPatch) -> No
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
     response = client.post("/tools/email/search", json={"query": "from:test"})
     assert response.status_code == 200
     assert pending_actions.pending_actions._pending == {}
+
+
+
+def test_google_preflight_returns_needs_configuration() -> None:
+    oauth._token_store = None
+    response = client.post("/tools/email/search", json={"query": "from:test"})
+    assert response.status_code == 500
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "needs_configuration"
+    assert "GOOGLE_CLIENT_ID" in error["missing_config"]
+
+
+def test_google_preflight_returns_needs_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    configure_google_env(monkeypatch)
+    monkeypatch.setattr(oauth, "build_flow", lambda _settings, scopes=None: FakeFlow())
+    oauth.state_store._states.clear()
+
+    response = client.post("/tools/email/search", json={"query": "from:test"})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "needs_connection"
+    assert error["authorization_url"] == "https://example.com/oauth"
+    assert error["state"] == "state-123"
+
+
+def test_google_preflight_returns_needs_reauth_for_expired_token_without_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(
+        monkeypatch,
+        refresh_token=None,
+        expiry=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    monkeypatch.setattr(oauth, "build_flow", lambda _settings, scopes=None: FakeFlow())
+    oauth.state_store._states.clear()
+
+    response = client.post("/tools/calendar/list_events", json={"calendar_id": "primary"})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "needs_reauth"
+    assert error["authorization_url"] == "https://example.com/oauth"
+
+
+def test_google_preflight_returns_missing_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(
+        monkeypatch,
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+    )
+    monkeypatch.setattr(oauth, "build_flow", lambda _settings, scopes=None: FakeFlow())
+    oauth.state_store._states.clear()
+
+    response = client.post("/tools/email/draft", json={"raw_base64": "aGVsbG8="})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "missing_scopes"
+    assert error["missing_scopes"] == [
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
+    assert error["authorization_url"] == "https://example.com/oauth"
+
+
+def test_chat_returns_google_preflight_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+
+    monkeypatch.setattr("app.chat.plan_chat", lambda _settings, _payload: {
+        "response": "Posso procurar seus e-mails",
+        "action": {"tool": "email.search", "payload": {"query": "from:test"}},
+    })
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: oauth.GoogleConnectionCheck(
+        status="needs_connection",
+        authorization_url="https://example.com/oauth",
+        state="state-123",
+        missing_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+    ))
+
+    response = client.post("/chat", json={"message": "procure emails"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "needs_connection"
+    assert body["google_connection"]["authorization_url"] == "https://example.com/oauth"
+    assert body["tool"] == "email.search"
 
 
 def test_responses_not_emotional_language() -> None:
@@ -746,7 +922,7 @@ def test_token_store_persists_to_disk(
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": datetime(2030, 1, 1, tzinfo=timezone.utc).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -1175,18 +1351,18 @@ def test_notes_persist_to_disk(tmp_path: Path) -> None:
     assert data
 
 
-def test_spotify_requires_token() -> None:
-    response = client.post("/tools/spotify/pause", json={})
-    assert response.status_code == 500
-    assert response.json()["detail"]["error"]["code"] == "spotify_not_configured"
-
-
 def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
     class FakeResponse:
+        def __init__(self, payload: dict[str, object] | None = None) -> None:
+            self._payload = payload or {}
+
         def raise_for_status(self) -> None:
             return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
 
     def fake_request(
         method: str,
@@ -1207,6 +1383,8 @@ def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
                 "timeout": timeout,
             }
         )
+        if url.endswith("/me/player/devices"):
+            return FakeResponse({"devices": [{"id": "device123", "is_active": True, "type": "Computer"}]})
         return FakeResponse()
 
     monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
@@ -1216,13 +1394,50 @@ def test_spotify_pause_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
 
     response = client.post("/tools/spotify/pause", json={})
     assert response.status_code == 200
-    assert calls
-    first_call = calls[0]
-    assert first_call["method"] == "PUT"
-    assert first_call["url"] == "https://spotify.local/me/player/pause"
-    assert first_call["headers"] == {"Authorization": "Bearer token"}
-    assert first_call["params"] == {"device_id": "device123"}
-    assert first_call["json"] is None
+    assert len(calls) == 2
+    assert calls[0]["url"] == "https://spotify.local/me/player/devices"
+    second_call = calls[1]
+    assert second_call["method"] == "PUT"
+    assert second_call["url"] == "https://spotify.local/me/player/pause"
+    assert second_call["headers"] == {"Authorization": "Bearer token"}
+    assert second_call["params"] == {"device_id": "device123"}
+    assert second_call["json"] is None
+
+
+def test_spotify_pause_no_devices_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object] | None = None) -> None:
+            self._payload = payload or {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        json: dict[str, object] | None = None,
+        timeout: int | float | None = None,
+    ) -> FakeResponse:
+        calls.append({"method": method, "url": url, "params": params, "json": json})
+        return FakeResponse({"devices": []})
+
+    monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("SPOTIFY_BASE_URL", "https://spotify.local")
+    monkeypatch.delenv("SPOTIFY_DEVICE_ID", raising=False)
+    monkeypatch.setattr("app.spotify.httpx.request", fake_request)
+
+    response = client.post("/tools/spotify/pause", json={})
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"]["code"] == "spotify_no_devices_available"
+    assert calls == [{"method": "GET", "url": "https://spotify.local/me/player/devices", "params": None, "json": None}]
 
 
 def test_spotify_pause_discovers_phone_device(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1311,7 +1526,7 @@ def test_audit_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 

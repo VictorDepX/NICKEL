@@ -27,6 +27,10 @@ def _settings() -> Settings:
         memory_store_path=None,
         audit_store_path=None,
         spotify_access_token=None,
+        spotify_client_id=None,
+        spotify_client_secret=None,
+        spotify_redirect_uri=None,
+        spotify_scopes=(),
         spotify_device_id=None,
         spotify_base_url=None,
     )
@@ -164,6 +168,7 @@ def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
         "email.read",
         {"handler": fake_email_read, "requires_confirmation": False},
     )
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
 
     result = handle_chat(_settings(), {"message": "ler email"})
 
@@ -198,6 +203,7 @@ def test_handle_chat_routes_supported_confirmation_tool(monkeypatch) -> None:
             "missing_factor": "none",
         },
     )
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
 
     result = handle_chat(_settings(), {"message": "enviar email"})
 
@@ -324,6 +330,7 @@ def test_handle_chat_returns_spotify_device_recovery_instead_of_handler_error(
 
 
 def test_handle_chat_returns_clarification_for_unsupported_tool(monkeypatch) -> None:
+def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) -> None:
     def fake_generate_response(settings, message, forced_tool=None, history=None):
         return {
             "response": "Não consegui",
@@ -346,3 +353,5 @@ def test_handle_chat_returns_clarification_for_unsupported_tool(monkeypatch) -> 
     assert result["status"] == "requires_clarification"
     assert result["fallback"] == "unsupported_llm_tool"
     assert result["orchestration"]["llm_tool"] == "invalid.tool"
+    assert result["status"] == "requires_clarification"
+    assert result["fallback"] == "low_confidence_action"
