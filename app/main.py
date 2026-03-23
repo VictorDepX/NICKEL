@@ -10,6 +10,7 @@ from app.chat import execute_chat_plan, handle_chat, plan_chat, resolve_tool_rea
 from app.config import get_settings
 from app.gmail import GMAIL_COMPOSE_SCOPES, GMAIL_READ_SCOPES, draft as email_draft
 from app.gmail import read as email_read
+from app.gmail import read_latest as email_read_latest
 from app.gmail import search as email_search
 from app.memory import configure_memory_store, confirm_memory, list_memory, propose_memory
 from app.notes import configure_notes_store
@@ -33,6 +34,7 @@ app = FastAPI(title="Nickel API", version="0.1.0")
 GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
     "email.search": GMAIL_READ_SCOPES,
     "email.read": GMAIL_READ_SCOPES,
+    "email.read_latest": GMAIL_READ_SCOPES,
     "email.draft": GMAIL_COMPOSE_SCOPES,
     "email.send": GMAIL_COMPOSE_SCOPES,
     "calendar.list_events": CALENDAR_READ_SCOPES,
@@ -113,6 +115,15 @@ def email_read_message(payload: dict[str, object]) -> dict[str, object]:
     settings = get_settings()
     result = email_read(settings, payload)
     record_event("email.read", "ok", payload)
+    return result
+
+
+@app.post("/tools/email/read_latest")
+def email_read_latest_message(payload: dict[str, object]) -> dict[str, object]:
+    settings = get_settings()
+    ensure_google_ready(settings, "email.read_latest")
+    result = email_read_latest(settings, payload)
+    record_event("email.read_latest", "ok", payload)
     return result
 
 

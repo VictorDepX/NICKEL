@@ -660,6 +660,116 @@ def test_email_read_returns_message(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["data"]["decoded_body"] == "hello"
 
 
+
+
+def test_email_read_latest_returns_empty_mailbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService([]))
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": list(DEFAULT_SCOPES),
+        },
+    )
+
+    response = client.post("/tools/email/read_latest", json={"query": ""})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["data"]["message"] is None
+    assert body["data"]["decoded_body"] is None
+    assert body["data"]["empty_mailbox"] is True
+
+
+def test_email_read_latest_returns_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+
+    messages = [
+        {"id": "msg-latest", "payload": {"body": {"data": "dWx0aW1vIGVtYWls"}}},
+        {"id": "msg-older", "payload": {"body": {"data": "b2xkZXI="}}},
+    ]
+    monkeypatch.setattr(gmail, "build", lambda *_args, **_kwargs: FakeGmailService(messages))
+
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "scopes": list(DEFAULT_SCOPES),
+        },
+    )
+
+    response = client.post("/tools/email/read_latest", json={"query": ""})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["message"]["id"] == "msg-latest"
+    assert body["data"]["decoded_body"] == "ultimo email"
+    assert body["data"]["empty_mailbox"] is False
+
+
+def test_chat_latest_email_request_executes_read_latest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.chat.generate_response",
+        lambda *_args, **_kwargs: {
+            "response": "Abrindo seu email mais recente.",
+            "action": {"tool": "email.read_latest", "payload": {"query": "", "user_id": "me"}},
+        },
+    )
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "tool": "email.read_latest",
+            "explanation": "ready",
+            "technical_details": "ready",
+            "missing_factor": "none",
+        },
+    )
+    monkeypatch.setattr(
+        "app.chat.check_google_connection",
+        lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"),
+    )
+    monkeypatch.setattr(
+        "app.chat.email_read_latest",
+        lambda _settings, _payload: {
+            "status": "ok",
+            "data": {
+                "message": {"id": "msg-latest"},
+                "decoded_body": "ultimo email",
+                "empty_mailbox": False,
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        "app.chat.decide_tool",
+        lambda _message: __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(tool="email.read_latest", reason="latest_email_keyword", confidence=0.99),
+    )
+    monkeypatch.setattr("app.chat.is_high_confidence", lambda _decision: True)
+
+    response = client.post("/chat", json={"message": "mostre meu email mais recente"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["tool_result"]["data"]["message"]["id"] == "msg-latest"
+    assert body["tool_result"]["data"]["empty_mailbox"] is False
+
+
 def test_email_draft_requires_raw_base64(monkeypatch: pytest.MonkeyPatch) -> None:
     oauth._token_store = None
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
@@ -893,6 +1003,17 @@ def test_chat_returns_google_preflight_payload(monkeypatch: pytest.MonkeyPatch) 
         state="state-123",
         missing_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
     ))
+
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "tool": "email.search",
+            "explanation": "ready",
+            "technical_details": "ready",
+            "missing_factor": "none",
+        },
+    )
 
     response = client.post("/chat", json={"message": "procure emails"})
     assert response.status_code == 200
@@ -1243,6 +1364,11 @@ def test_chat_plan_sensitive_tool_requires_ready_before_confirmation(
             "technical_details": "ready",
             "missing_factor": "none",
         },
+    )
+
+    monkeypatch.setattr(
+        "app.chat.check_google_connection",
+        lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"),
     )
 
     ready = client.post("/chat", json={"message": "envie este email"})
