@@ -6,16 +6,19 @@ from typing import Callable
 
 import requests
 
-from cli.api_client import NickelAPIClient
+from cli.api_client import AgentResponse, NickelAPIClient
 from cli.session_store import SessionState, load_session, save_session
 from cli.ui import (
     clear_screen,
     print_banner,
+    print_connection_notice,
     print_error,
     print_info,
     print_nickel,
     print_pending,
+    print_uncertainty_notice,
     print_user,
+    print_user_action_instruction,
 )
 
 
@@ -66,16 +69,7 @@ def main() -> int:
             state.history.pop()
             continue
 
-        print_nickel(response.reply)
-        state.history.append({"role": "assistant", "content": response.reply})
-        state.history = state.history[-30:]
-
-        if response.pending_action:
-            state.pending_action = response.pending_action
-            print_pending(response.pending_action.tool, response.pending_action.action_id)
-        else:
-            state.pending_action = None
-
+        _render_agent_response(response, state)
         save_session(state)
 
 
@@ -174,6 +168,52 @@ def cancel_command(state: SessionState, client: NickelAPIClient) -> bool:
     state.pending_action = None
     save_session(state)
     return True
+
+
+def _render_agent_response(response: AgentResponse, state: SessionState) -> None:
+    message = response.reply.strip() or "(sem resposta)"
+    print_nickel(message)
+    state.history.append({"role": "assistant", "content": message})
+    state.history = state.history[-30:]
+
+    if response.status == "needs_connection":
+        service_name = response.service or "esse serviço"
+        print_connection_notice(
+            f"Não consegui acessar seu {service_name} agora. Posso te passar o link para conectar a conta.",
+            authorization_url=response.authorization_url,
+        )
+        if response.authorization_url:
+            print_user_action_instruction(
+                "Abra o link acima para conectar a conta e depois tente novamente o pedido."
+            )
+        state.pending_action = None
+        return
+
+    if response.status == "requires_clarification":
+        print_uncertainty_notice("Não tenho certeza suficiente para executar isso sozinho.")
+        print_user_action_instruction(message)
+        state.pending_action = None
+        return
+
+    if response.status == "pending_confirmation":
+        if response.pending_action:
+            state.pending_action = response.pending_action
+            print_pending(response.pending_action.tool, response.pending_action.action_id)
+        else:
+            state.pending_action = None
+        print_user_action_instruction("Se estiver tudo certo, responda com /confirm ou use /cancel para abortar.")
+        return
+
+    if response.status == "ok":
+        state.pending_action = None
+        return
+
+    if response.pending_action:
+        state.pending_action = response.pending_action
+        print_pending(response.pending_action.tool, response.pending_action.action_id)
+        return
+
+    state.pending_action = None
 
 
 if __name__ == "__main__":
