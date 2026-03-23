@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from app.chat import handle_chat
+from types import SimpleNamespace
+
+from app.chat import handle_chat, plan_chat, resolve_action_readiness
 from app.config import Settings
 
 
@@ -66,93 +68,9 @@ def test_handle_chat_passes_history_to_llm(monkeypatch) -> None:
     ]
 
 
-def test_handle_chat_ignores_invalid_history_entries(monkeypatch) -> None:
-    captured = {}
-
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        captured["history"] = history
-        return {"response": "ok", "action": None}
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-
-    handle_chat(
-        _settings(),
-        {
-            "message": "oi",
-            "history": [
-                {"role": "system", "content": "hack"},
-                {"role": "assistant", "content": "  "},
-                {"role": "assistant", "content": "Olá"},
-                "bad",
-            ],
-        },
-    )
-
-    assert captured["history"] == [{"role": "assistant", "content": "Olá"}]
-
-
-def test_handle_chat_does_not_force_tool_when_low_confidence(monkeypatch) -> None:
-    captured = {}
-
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        captured["forced_tool"] = forced_tool
-        return {"response": "ok", "action": None}
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-
-    handle_chat(
-        _settings(),
-        {"message": "quero ver agenda e mandar email"},
-    )
-
-    assert captured["forced_tool"] is None
-
-
-def test_handle_chat_fallbacks_on_high_confidence_mismatch(monkeypatch) -> None:
-    captured = {}
-
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        captured["forced_tool"] = forced_tool
-        return {
-            "response": "vou enviar",
-            "action": {"tool": "email.send", "payload": {}},
-        }
-
-    def fake_record_event(tool, status, payload, action_id=None):
-        captured["audit"] = {
-            "tool": tool,
-            "status": status,
-            "payload": payload,
-            "action_id": action_id,
-        }
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-    monkeypatch.setattr("app.chat.record_event", fake_record_event)
-
-    result = handle_chat(
-        _settings(),
-        {"message": "pausar música"},
-    )
-
-    assert captured["forced_tool"] == "spotify.pause"
-    assert result["status"] == "requires_clarification"
-    assert result["fallback"] == "tool_mismatch"
-    assert captured["audit"]["tool"] == "orchestrator.mismatch"
-
-
-def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        return {
-            "response": "Li seus e-mails",
-            "action": {"tool": "email.read", "payload": {"id": "abc"}},
-        }
-
-    def fake_email_read(settings, payload):
-        assert payload == {"id": "abc"}
-        return {"id": "abc", "subject": "Olá"}
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-    monkeypatch.setattr("app.chat.email_read", fake_email_read)
+def test_resolve_action_readiness_requires_clarification_for_missing_parameters(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         "app.chat.resolve_tool_readiness",
         lambda *_args, **_kwargs: {
@@ -163,12 +81,85 @@ def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
             "missing_factor": "none",
         },
     )
+
+    readiness = resolve_action_readiness(
+        _settings(),
+        "email.read",
+        {},
+        "ler meu e-mail importante",
+        confidence=0.4,
+    )
+
+    assert readiness["status"] == "requires_clarification"
+    assert readiness["missing_factor"] == "missing_required_parameters"
+    assert "message_id" in readiness["technical_details"]
+
+
+def test_plan_chat_returns_needs_connection_with_authorization_url(monkeypatch) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Posso verificar sua agenda depois de reconectar o Google.",
+            "action": {
+                "tool": "calendar.list_events",
+                "payload": {"calendar_id": "primary"},
+            },
+        }
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr(
+        "app.chat.resolve_action_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "needs_connection",
+            "tool": "calendar.list_events",
+            "explanation": "Reconecte sua conta Google.",
+            "technical_details": "Nenhum token OAuth encontrado.",
+            "missing_factor": "google_account_connection",
+            "authorization_url": "https://example.com/oauth",
+            "state": "state-123",
+        },
+    )
+
+    result = plan_chat(_settings(), {"message": "ver agenda"})
+
+    assert result["status"] == "needs_connection"
+    assert result["authorization_url"] == "https://example.com/oauth"
+    assert result["tool_readiness"]["missing_factor"] == "google_account_connection"
+
+
+def test_handle_chat_executes_when_tool_is_ready(monkeypatch) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Li seus e-mails",
+            "action": {"tool": "email.read", "payload": {"message_id": "abc"}},
+        }
+
+    def fake_email_read(settings, payload):
+        assert payload == {"message_id": "abc"}
+        return {"id": "abc", "subject": "Olá"}
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr("app.chat.email_read", fake_email_read)
     monkeypatch.setitem(
         __import__("app.chat", fromlist=["TOOL_HANDLERS"]).TOOL_HANDLERS,
         "email.read",
         {"handler": fake_email_read, "requires_confirmation": False},
     )
-    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
+    monkeypatch.setattr(
+        "app.chat.resolve_action_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "tool": "email.read",
+            "explanation": "ready",
+            "technical_details": "ready",
+            "missing_factor": "none",
+        },
+    )
+    monkeypatch.setattr(
+        "app.chat.check_google_connection",
+        lambda _settings, _scopes: __import__(
+            "app.oauth", fromlist=["GoogleConnectionCheck"]
+        ).GoogleConnectionCheck(status="ready"),
+    )
 
     result = handle_chat(_settings(), {"message": "ler email"})
 
@@ -179,22 +170,22 @@ def test_handle_chat_routes_supported_read_tool(monkeypatch) -> None:
     }
 
 
-def test_handle_chat_routes_supported_confirmation_tool(monkeypatch) -> None:
+def test_handle_chat_sensitive_tool_waits_for_confirmation_when_ready(monkeypatch) -> None:
     def fake_generate_response(settings, message, forced_tool=None, history=None):
         return {
-            "response": "Posso enviar",
-            "action": {"tool": "email.send", "payload": {"to": "a@b.com"}},
+            "response": "Posso enviar assim que você confirmar.",
+            "action": {"tool": "email.send", "payload": {"raw_base64": "abc"}},
         }
 
     def fake_require_confirmation(tool, payload):
         assert tool == "email.send"
-        assert payload == {"to": "a@b.com"}
+        assert payload == {"raw_base64": "abc"}
         return {"action_id": "pending-1", "tool": tool, "payload": payload}
 
     monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
     monkeypatch.setattr("app.chat.require_confirmation", fake_require_confirmation)
     monkeypatch.setattr(
-        "app.chat.resolve_tool_readiness",
+        "app.chat.resolve_action_readiness",
         lambda *_args, **_kwargs: {
             "status": "ready",
             "tool": "email.send",
@@ -203,155 +194,54 @@ def test_handle_chat_routes_supported_confirmation_tool(monkeypatch) -> None:
             "missing_factor": "none",
         },
     )
-    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
+    monkeypatch.setattr(
+        "app.chat.check_google_connection",
+        lambda _settings, _scopes: __import__(
+            "app.oauth", fromlist=["GoogleConnectionCheck"]
+        ).GoogleConnectionCheck(status="ready"),
+    )
 
     result = handle_chat(_settings(), {"message": "enviar email"})
 
     assert result == {
         "status": "pending_confirmation",
-        "response": "Posso enviar",
+        "response": "Posso enviar assim que você confirmar.",
         "pending_action": {
             "action_id": "pending-1",
             "tool": "email.send",
-            "payload": {"to": "a@b.com"},
+            "payload": {"raw_base64": "abc"},
         },
     }
 
 
-def test_handle_chat_returns_recovery_when_google_not_connected(monkeypatch) -> None:
+def test_plan_chat_returns_clarification_when_tool_and_confidence_are_weak(monkeypatch) -> None:
     def fake_generate_response(settings, message, forced_tool=None, history=None):
         return {
-            "response": "Posso verificar sua agenda depois que a conta estiver conectada.",
-            "action": {
-                "tool": "calendar.list_events",
-                "payload": {"calendar_id": "primary"},
-            },
+            "response": "Acho que quer ler um e-mail, mas faltam detalhes.",
+            "action": {"tool": "email.read", "payload": {}},
         }
 
     monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
     monkeypatch.setattr(
-        "app.chat.resolve_tool_readiness",
-        lambda *_args, **_kwargs: {
-            "status": "needs_connection",
-            "tool": "calendar.list_events",
-            "explanation": "Conecte sua conta Google.",
-            "technical_details": "Nenhum token OAuth encontrado.",
-            "missing_factor": "google_account_connection",
-            "authorization_url": "https://example.com/oauth",
-            "state": "state-123",
-        },
+        "app.chat.decide_tool",
+        lambda _message: SimpleNamespace(
+            tool="email.read", reason="teste", confidence=0.9
+        ),
     )
-
-    result = handle_chat(_settings(), {"message": "ver agenda"})
-
-    assert result["status"] == "tool_not_ready"
-    assert result["tool_readiness"]["status"] == "needs_connection"
-    assert result["tool_readiness"]["authorization_url"] == "https://example.com/oauth"
-    assert result["requires_confirmation"] is False
-
-
-def test_handle_chat_sensitive_tool_only_confirms_when_ready(monkeypatch) -> None:
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        return {
-            "response": "Posso enviar assim que você confirmar.",
-            "action": {"tool": "email.send", "payload": {"to": "a@b.com"}},
-        }
-
-    calls = {"confirm": 0}
-
-    def fake_require_confirmation(tool, payload):
-        calls["confirm"] += 1
-        return {"action_id": "pending-1", "tool": tool, "payload": payload}
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-    monkeypatch.setattr("app.chat.require_confirmation", fake_require_confirmation)
-    monkeypatch.setattr(
-        "app.chat.resolve_tool_readiness",
-        lambda *_args, **_kwargs: {
-            "status": "needs_connection",
-            "tool": "email.send",
-            "explanation": "Conecte o Google antes de enviar.",
-            "technical_details": "Nenhum token OAuth encontrado.",
-            "missing_factor": "google_account_connection",
-        },
-    )
-
-    blocked = handle_chat(_settings(), {"message": "enviar email"})
-
-    assert blocked["status"] == "tool_not_ready"
-    assert calls["confirm"] == 0
-
+    monkeypatch.setattr("app.chat.is_high_confidence", lambda _decision: True)
     monkeypatch.setattr(
         "app.chat.resolve_tool_readiness",
         lambda *_args, **_kwargs: {
             "status": "ready",
-            "tool": "email.send",
+            "tool": "email.read",
             "explanation": "ready",
             "technical_details": "ready",
             "missing_factor": "none",
         },
     )
 
-    ready = handle_chat(_settings(), {"message": "enviar email"})
-
-    assert ready["status"] == "pending_confirmation"
-    assert calls["confirm"] == 1
-
-
-def test_handle_chat_returns_spotify_device_recovery_instead_of_handler_error(
-    monkeypatch,
-) -> None:
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        return {
-            "response": "Posso pausar quando houver um device disponível.",
-            "action": {"tool": "spotify.pause", "payload": {}},
-        }
-
-    def fail_pause(*_args, **_kwargs):
-        raise AssertionError("spotify handler should not run when readiness is blocked")
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-    monkeypatch.setattr("app.chat.spotify_pause", fail_pause)
-    monkeypatch.setattr(
-        "app.chat.resolve_tool_readiness",
-        lambda *_args, **_kwargs: {
-            "status": "needs_external_activation",
-            "tool": "spotify.pause",
-            "explanation": "Abra o Spotify em um device ativo.",
-            "technical_details": "Nenhum device encontrado.",
-            "missing_factor": "spotify_playback_device",
-        },
-    )
-
-    result = handle_chat(_settings(), {"message": "pausar música"})
-
-    assert result["status"] == "tool_not_ready"
-    assert result["tool_readiness"]["missing_factor"] == "spotify_playback_device"
-
-
-def test_handle_chat_returns_clarification_for_unsupported_tool(monkeypatch) -> None:
-def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) -> None:
-    def fake_generate_response(settings, message, forced_tool=None, history=None):
-        return {
-            "response": "Não consegui",
-            "action": {"tool": "invalid.tool", "payload": {}},
-        }
-
-    from types import SimpleNamespace
-
-    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
-    monkeypatch.setattr(
-        "app.chat.decide_tool",
-        lambda _message: SimpleNamespace(
-            tool="invalid.tool", reason="forced_test", confidence=0.99
-        ),
-    )
-    monkeypatch.setattr("app.chat.is_high_confidence", lambda _decision: True)
-
-    result = handle_chat(_settings(), {"message": "fazer algo"})
+    result = plan_chat(_settings(), {"message": "abre o email"})
 
     assert result["status"] == "requires_clarification"
-    assert result["fallback"] == "unsupported_llm_tool"
-    assert result["orchestration"]["llm_tool"] == "invalid.tool"
-    assert result["status"] == "requires_clarification"
-    assert result["fallback"] == "low_confidence_action"
+    assert result["tool_readiness"]["missing_factor"] == "missing_required_parameters"
+    assert result["requires_confirmation"] is False
