@@ -240,8 +240,121 @@ def test_plan_chat_returns_clarification_when_tool_and_confidence_are_weak(monke
         },
     )
 
-    result = plan_chat(_settings(), {"message": "abre o email"})
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
+
+    ready = handle_chat(_settings(), {"message": "enviar email"})
+
+    assert ready["status"] == "pending_confirmation"
+    assert calls["confirm"] == 1
+
+
+def test_handle_chat_returns_spotify_device_recovery_instead_of_handler_error(
+    monkeypatch,
+) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Posso pausar quando houver um device disponível.",
+            "action": {"tool": "spotify.pause", "payload": {}},
+        }
+
+    def fail_pause(*_args, **_kwargs):
+        raise AssertionError("spotify handler should not run when readiness is blocked")
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr("app.chat.spotify_pause", fail_pause)
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "needs_external_activation",
+            "tool": "spotify.pause",
+            "explanation": "Abra o Spotify em um device ativo.",
+            "technical_details": "Nenhum device encontrado.",
+            "missing_factor": "spotify_playback_device",
+        },
+    )
+
+    result = handle_chat(_settings(), {"message": "pausar música"})
+
+    assert result["status"] == "tool_not_ready"
+    assert result["tool_readiness"]["missing_factor"] == "spotify_playback_device"
+
+
+def test_handle_chat_returns_standard_error_for_unsupported_tool(monkeypatch) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Não consegui",
+            "action": {"tool": "invalid.tool", "payload": {}},
+        }
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    monkeypatch.setattr(
+        "app.chat.decide_tool",
+        lambda _message: SimpleNamespace(
+            tool="invalid.tool", reason="forced_test", confidence=0.99
+        ),
+    )
+    monkeypatch.setattr("app.chat.is_high_confidence", lambda _decision: True)
+
+    result = handle_chat(_settings(), {"message": "fazer algo"})
 
     assert result["status"] == "requires_clarification"
-    assert result["tool_readiness"]["missing_factor"] == "missing_required_parameters"
-    assert result["requires_confirmation"] is False
+    assert result["fallback"] == "unsupported_llm_tool"
+    assert result["orchestration"]["llm_tool"] == "invalid.tool"
+
+
+def test_handle_chat_routes_latest_email_request(monkeypatch) -> None:
+    def fake_generate_response(settings, message, forced_tool=None, history=None):
+        return {
+            "response": "Vou abrir seu email mais recente.",
+            "action": {"tool": "email.read_latest", "payload": {"user_id": "me", "query": ""}},
+        }
+
+    def fake_email_read_latest(settings, payload):
+        assert payload == {"user_id": "me", "query": ""}
+        return {
+            "status": "ok",
+            "data": {
+                "message": {"id": "msg-latest"},
+                "decoded_body": "Conteúdo mais recente",
+                "empty_mailbox": False,
+            },
+        }
+
+    monkeypatch.setattr("app.chat.generate_response", fake_generate_response)
+    from types import SimpleNamespace
+    monkeypatch.setattr("app.chat.decide_tool", lambda _message: SimpleNamespace(tool="email.read_latest", reason="latest_email_keyword", confidence=0.99))
+    monkeypatch.setattr("app.chat.is_high_confidence", lambda _decision: True)
+    monkeypatch.setattr("app.chat.email_read_latest", fake_email_read_latest)
+    monkeypatch.setattr(
+        "app.chat.resolve_tool_readiness",
+        lambda *_args, **_kwargs: {
+            "status": "ready",
+            "tool": "email.read_latest",
+            "explanation": "ready",
+            "technical_details": "ready",
+            "missing_factor": "none",
+        },
+    )
+    monkeypatch.setitem(
+        __import__("app.chat", fromlist=["TOOL_HANDLERS"]).TOOL_HANDLERS,
+        "email.read_latest",
+        {"handler": fake_email_read_latest, "requires_confirmation": False},
+    )
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: __import__("app.oauth", fromlist=["GoogleConnectionCheck"]).GoogleConnectionCheck(status="ready"))
+
+    result = handle_chat(_settings(), {"message": "leia meu primeiro email"})
+
+    assert result == {
+        "status": "ok",
+        "response": "Vou abrir seu email mais recente.",
+        "tool_result": {
+            "status": "ok",
+            "data": {
+                "message": {"id": "msg-latest"},
+                "decoded_body": "Conteúdo mais recente",
+                "empty_mailbox": False,
+            },
+        },
+    }

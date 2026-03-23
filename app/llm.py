@@ -58,13 +58,28 @@ _TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "email.read",
-            "description": "Read one email message by id.",
+            "description": "Read one email message by a known Gmail message_id. Do not use for natural requests like primeiro/último email unless the message_id is already known.",
             "parameters": {
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["message_id", "user_id"],
                 "properties": {
                     "message_id": {"type": "string"},
+                    "user_id": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email.read_latest",
+            "description": "Read the most recent email when the user asks for the primeiro/último/email mais recente and no message_id is known.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "query": {"type": "string"},
                     "user_id": {"type": "string"},
                 },
             },
@@ -276,7 +291,8 @@ def _build_messages(
         tool_instructions = (
             "Tools available:\n"
             "- email.search (read): payload {query, max_results, user_id}\n"
-            "- email.read (read): payload {message_id, user_id}\n"
+            "- email.read (read): payload {message_id, user_id}; only when message_id is already known\n"
+            "- email.read_latest (read): payload {query, user_id}; use for requests like primeiro email, último email, or email mais recente\n"
             "- email.draft (write, no confirmation): payload {raw_base64, user_id}\n"
             "- email.send (write, confirmation): payload {raw_base64, user_id}\n"
             "- calendar.list_events (read): payload {calendar_id, max_results, time_min, time_max}\n"
@@ -291,6 +307,7 @@ def _build_messages(
             "Return ONLY valid JSON with keys: response (string), action (object or null).\n"
             "If action is used, include tool and payload fields.\n"
             "If no tool is required, action must be null and provide a natural conversational response.\n"
+            "For requests to read the first, last, latest, or most recent email without a known message_id, prefer email.read_latest instead of email.read.\n"
             "Do not include markdown or commentary outside JSON.\n"
             "Do not wrap JSON in markdown fences."
         )

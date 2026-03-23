@@ -9,14 +9,20 @@ from app.calendar import CALENDAR_READ_SCOPES, CALENDAR_WRITE_SCOPES, list_event
 from app.config import Settings
 from app.gmail import GMAIL_COMPOSE_SCOPES, GMAIL_READ_SCOPES, draft as email_draft
 from app.gmail import read as email_read
+from app.gmail import read_latest as email_read_latest
 from app.gmail import search as email_search
 from app.llm import generate_response
 from app.oauth import get_token_store, start_oauth
 from app.orchestrator import decide_tool, is_high_confidence
 from app.oauth import check_google_connection
 from app.pending_actions import require_confirmation
-from app.spotify import _fetch_devices, _select_device_id, pause as spotify_pause, play as spotify_play, skip as spotify_skip
-from app.spotify_oauth import SPOTIFY_TOKEN_STORE_KEY, check_spotify_connection, start_spotify_oauth
+from app.spotify import (
+    check_spotify_playback_target,
+    pause as spotify_pause,
+    play as spotify_play,
+    skip as spotify_skip,
+)
+from app.spotify_oauth import SPOTIFY_TOKEN_STORE_KEY, start_spotify_oauth
 from app.tasks import list_tasks
 
 ReadinessStatus = Literal[
@@ -48,6 +54,7 @@ _SEMANTIC_REQUIREMENTS: dict[str, tuple[str, ...]] = {
 GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
     "email.search": GMAIL_READ_SCOPES,
     "email.read": GMAIL_READ_SCOPES,
+    "email.read_latest": GMAIL_READ_SCOPES,
     "email.draft": GMAIL_COMPOSE_SCOPES,
     "email.send": GMAIL_COMPOSE_SCOPES,
     "calendar.list_events": CALENDAR_READ_SCOPES,
@@ -81,6 +88,7 @@ _CONFIRMATION_REQUIRED_TOOLS = {
 TOOL_HANDLERS: dict[str, dict[str, Any]] = {
     "email.search": {"handler": email_search, "requires_confirmation": False},
     "email.read": {"handler": email_read, "requires_confirmation": False},
+    "email.read_latest": {"handler": email_read_latest, "requires_confirmation": False},
     "email.draft": {"handler": email_draft, "requires_confirmation": False},
     "email.send": {"handler": None, "requires_confirmation": True},
     "calendar.list_events": {
@@ -100,6 +108,7 @@ TOOL_HANDLERS: dict[str, dict[str, Any]] = {
 _GOOGLE_TOOL_SCOPES: dict[str, tuple[str, ...]] = {
     "email.search": ("https://www.googleapis.com/auth/gmail.readonly",),
     "email.read": ("https://www.googleapis.com/auth/gmail.readonly",),
+    "email.read_latest": ("https://www.googleapis.com/auth/gmail.readonly",),
     "email.draft": ("https://www.googleapis.com/auth/gmail.compose",),
     "email.send": ("https://www.googleapis.com/auth/gmail.send",),
     "calendar.list_events": ("https://www.googleapis.com/auth/calendar.readonly",),
@@ -347,10 +356,12 @@ def _resolve_spotify_readiness(
                 state=session.state,
             )
 
-    if tool in {"spotify.play", "spotify.pause", "spotify.skip"} and not settings.spotify_device_id:
-        base_url = settings.spotify_base_url or "https://api.spotify.com/v1"
-        devices = _fetch_devices(access_token, base_url)
-        if not _select_device_id(devices):
+    if (
+        tool in {"spotify.play", "spotify.pause", "spotify.skip"}
+        and not settings.spotify_device_id
+    ):
+        target = check_spotify_playback_target(settings)
+        if not target.device_id:
             return _readiness_result(
                 status="needs_external_activation",
                 tool=tool,
@@ -606,6 +617,9 @@ def execute_chat_plan(settings: Settings, payload: dict[str, Any]) -> dict[str, 
         return {"status": "ok", "response": response_text, "tool_result": tool_result}
     if tool == "email.read":
         tool_result = email_read(settings, action_payload)
+        return {"status": "ok", "response": response_text, "tool_result": tool_result}
+    if tool == "email.read_latest":
+        tool_result = email_read_latest(settings, action_payload)
         return {"status": "ok", "response": response_text, "tool_result": tool_result}
     if tool == "email.draft":
         tool_result = email_draft(settings, action_payload)
