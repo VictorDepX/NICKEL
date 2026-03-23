@@ -6,6 +6,7 @@ import json
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
@@ -1316,6 +1317,45 @@ def test_chat_execute_returns_spotify_device_block(
     assert body["status"] == "tool_not_ready"
     assert body["tool_readiness"]["status"] == "needs_external_activation"
     assert body["tool_readiness"]["missing_factor"] == "spotify_playback_device"
+
+def test_chat_execute_returns_spotify_device_block_when_readiness_check_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_pause(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(
+            "spotify handler should not execute when readiness is not ready"
+        )
+
+    def raise_no_devices(_settings: object) -> None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "spotify_no_devices_available",
+                    "message": "No Spotify playback devices are available.",
+                }
+            },
+        )
+
+    monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "token")
+    monkeypatch.setattr("app.chat.spotify_pause", fail_pause)
+    monkeypatch.setattr("app.chat.check_spotify_playback_target", raise_no_devices)
+
+    response = client.post(
+        "/chat/execute",
+        json={
+            "response": "Posso pausar",
+            "action": {"tool": "spotify.pause", "payload": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tool_not_ready"
+    assert body["tool_readiness"]["status"] == "needs_external_activation"
+    assert body["tool_readiness"]["missing_factor"] == "spotify_playback_device"
+    assert body["tool_readiness"]["technical_details"] == "No Spotify playback devices are available."
+
 
 
 def test_google_readiness_reports_missing_oauth_connection() -> None:

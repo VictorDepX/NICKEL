@@ -282,6 +282,36 @@ def _resolve_google_readiness(
     )
 
 
+def _spotify_device_readiness_from_error(
+    tool: str,
+    exc: HTTPException,
+) -> dict[str, Any] | None:
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    error = detail.get("error") if isinstance(detail, dict) else {}
+    code = error.get("code") if isinstance(error, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+
+    if code in {
+        "spotify_no_devices_available",
+        "spotify_no_active_device",
+        "spotify_device_not_configured",
+    }:
+        technical_details = (
+            str(message)
+            if message
+            else "Spotify não retornou um device pronto para reprodução."
+        )
+        return _readiness_result(
+            status="needs_external_activation",
+            tool=tool,
+            explanation="Preciso que exista um device Spotify ativo ou disponível antes de executar essa ação.",
+            technical_details=technical_details,
+            missing_factor="spotify_playback_device",
+        )
+
+    return None
+
+
 def _resolve_spotify_readiness(
     settings: Settings,
     tool: str,
@@ -354,7 +384,13 @@ def _resolve_spotify_readiness(
         tool in {"spotify.play", "spotify.pause", "spotify.skip"}
         and not settings.spotify_device_id
     ):
-        target = check_spotify_playback_target(settings)
+        try:
+            target = check_spotify_playback_target(settings)
+        except HTTPException as exc:
+            readiness = _spotify_device_readiness_from_error(tool, exc)
+            if readiness is not None:
+                return readiness
+            raise
         if not target.device_id:
             return _readiness_result(
                 status="needs_external_activation",
