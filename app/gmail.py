@@ -8,7 +8,16 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from app.config import Settings
-from app.oauth import get_credentials
+from app.oauth import require_google_connection
+
+GMAIL_READ_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.readonly",
+)
+
+GMAIL_COMPOSE_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
+)
 
 
 def _handle_http_error(exc: HttpError, code: str, message: str) -> HTTPException:
@@ -35,7 +44,7 @@ def _handle_http_error(exc: HttpError, code: str, message: str) -> HTTPException
 
 
 def search(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, GMAIL_READ_SCOPES)
     query = payload.get("query", "")
     max_results = payload.get("max_results", 10)
     user_id = payload.get("user_id", "me")
@@ -61,7 +70,7 @@ def search(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def read(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, GMAIL_READ_SCOPES)
     user_id = payload.get("user_id", "me")
     message_id = payload.get("message_id")
     if not message_id:
@@ -128,7 +137,7 @@ def _require_raw_message(payload: dict[str, Any]) -> str:
 
 
 def draft(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, GMAIL_COMPOSE_SCOPES)
     user_id = payload.get("user_id", "me")
     raw = _require_raw_message(payload)
 
@@ -152,7 +161,7 @@ def draft(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def send(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, GMAIL_COMPOSE_SCOPES)
     user_id = payload.get("user_id", "me")
     raw = _require_raw_message(payload)
 

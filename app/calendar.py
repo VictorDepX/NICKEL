@@ -7,7 +7,15 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from app.config import Settings
-from app.oauth import get_credentials
+from app.oauth import require_google_connection
+
+CALENDAR_READ_SCOPES = (
+    "https://www.googleapis.com/auth/calendar.readonly",
+)
+
+CALENDAR_WRITE_SCOPES = (
+    "https://www.googleapis.com/auth/calendar.events",
+)
 
 
 def _handle_http_error(exc: HttpError, code: str, message: str) -> HTTPException:
@@ -34,7 +42,7 @@ def _handle_http_error(exc: HttpError, code: str, message: str) -> HTTPException
 
 
 def list_events(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, CALENDAR_READ_SCOPES)
     calendar_id = payload.get("calendar_id", "primary")
     max_results = payload.get("max_results", 10)
     time_min = payload.get("time_min")
@@ -70,7 +78,7 @@ def list_events(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, CALENDAR_WRITE_SCOPES)
     calendar_id = payload.get("calendar_id")
     event = payload.get("event")
     if not calendar_id:
@@ -119,7 +127,7 @@ def create_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def modify_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
-    credentials = get_credentials(settings)
+    credentials = require_google_connection(settings, CALENDAR_WRITE_SCOPES)
     calendar_id = payload.get("calendar_id")
     event_id = payload.get("event_id")
     event = payload.get("event")

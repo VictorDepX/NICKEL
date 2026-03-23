@@ -15,7 +15,7 @@ from app.notes import configure_notes_store
 from app.audit import configure_audit_store
 from app.memory import configure_memory_store
 from app.tasks import configure_tasks_store
-from app.config import get_settings
+from app.config import DEFAULT_SCOPES, get_settings
 import app.main as main_module
 from app.main import app
 
@@ -41,6 +41,35 @@ class FakeFlow:
 
     def fetch_token(self, code: str) -> None:
         self.credentials.token = f"access-{code}"
+
+
+def configure_google_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost/callback")
+    monkeypatch.setenv("OAUTH_TOKEN_KEY", Fernet.generate_key().decode("utf-8"))
+
+
+def store_google_token(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    access_token: str = "access",
+    refresh_token: str | None = "refresh",
+    expiry: datetime | None = None,
+    scopes: list[str] | None = None,
+) -> None:
+    oauth._token_store = None
+    configure_google_env(monkeypatch)
+    token_store = oauth.get_token_store(get_settings())
+    token_store.store(
+        "default",
+        {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expiry": (expiry or (datetime.now(timezone.utc) + timedelta(hours=1))).isoformat(),
+            "scopes": scopes or list(DEFAULT_SCOPES),
+        },
+    )
 
 
 def test_health() -> None:
@@ -199,7 +228,7 @@ def test_calendar_list_events_returns_items(monkeypatch: pytest.MonkeyPatch) -> 
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -224,13 +253,13 @@ def test_calendar_list_events_expired_token(monkeypatch: pytest.MonkeyPatch) -> 
             "access_token": "access",
             "refresh_token": None,
             "expiry": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
     response = client.post("/tools/calendar/list_events", json={"calendar_id": "primary"})
     assert response.status_code == 401
-    assert response.json()["detail"]["error"]["code"] == "token_expired"
+    assert response.json()["detail"]["error"]["code"] == "needs_reauth"
 
 
 def test_calendar_list_events_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -249,7 +278,7 @@ def test_calendar_list_events_builds_request(monkeypatch: pytest.MonkeyPatch) ->
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -286,7 +315,7 @@ def test_calendar_create_event_after_confirmation(monkeypatch: pytest.MonkeyPatc
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -314,7 +343,7 @@ def test_calendar_modify_event_after_confirmation(monkeypatch: pytest.MonkeyPatc
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -440,7 +469,7 @@ def test_email_search_returns_results(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -465,7 +494,7 @@ def test_email_search_builds_request(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -495,7 +524,7 @@ def test_email_read_requires_message_id(monkeypatch: pytest.MonkeyPatch) -> None
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -524,7 +553,7 @@ def test_email_read_returns_message(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -549,7 +578,7 @@ def test_email_draft_requires_raw_base64(monkeypatch: pytest.MonkeyPatch) -> Non
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -573,7 +602,7 @@ def test_email_draft_creates_draft(monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -597,7 +626,7 @@ def test_email_send_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> No
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -607,7 +636,8 @@ def test_email_send_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> No
     assert response.json()["data"]["message"]["id"] == "sent"
 
 
-def test_write_tool_creates_pending_action() -> None:
+def test_write_tool_creates_pending_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(monkeypatch)
     response = client.post("/tools/email/send", json={"to": "user@example.com"})
     body = response.json()
     assert response.status_code == 200
@@ -616,7 +646,8 @@ def test_write_tool_creates_pending_action() -> None:
     assert "action_id" in body
 
 
-def test_confirm_requires_explicit_true() -> None:
+def test_confirm_requires_explicit_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(monkeypatch)
     response = client.post("/tools/calendar/create_event", json={"title": "A"})
     action_id = response.json()["action_id"]
     confirm_response = client.post(
@@ -643,6 +674,7 @@ def test_confirm_executes_action_stub() -> None:
 
 
 def test_write_tool_does_not_execute_without_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(monkeypatch)
     def _fail(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("write tool executed without confirmation")
 
@@ -668,13 +700,94 @@ def test_no_pending_action_for_read_tools(monkeypatch: pytest.MonkeyPatch) -> No
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
     response = client.post("/tools/email/search", json={"query": "from:test"})
     assert response.status_code == 200
     assert pending_actions.pending_actions._pending == {}
+
+
+
+def test_google_preflight_returns_needs_configuration() -> None:
+    oauth._token_store = None
+    response = client.post("/tools/email/search", json={"query": "from:test"})
+    assert response.status_code == 500
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "needs_configuration"
+    assert "GOOGLE_CLIENT_ID" in error["missing_config"]
+
+
+def test_google_preflight_returns_needs_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+    configure_google_env(monkeypatch)
+    monkeypatch.setattr(oauth, "build_flow", lambda _settings, scopes=None: FakeFlow())
+    oauth.state_store._states.clear()
+
+    response = client.post("/tools/email/search", json={"query": "from:test"})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "needs_connection"
+    assert error["authorization_url"] == "https://example.com/oauth"
+    assert error["state"] == "state-123"
+
+
+def test_google_preflight_returns_needs_reauth_for_expired_token_without_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(
+        monkeypatch,
+        refresh_token=None,
+        expiry=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    monkeypatch.setattr(oauth, "build_flow", lambda _settings, scopes=None: FakeFlow())
+    oauth.state_store._states.clear()
+
+    response = client.post("/tools/calendar/list_events", json={"calendar_id": "primary"})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "needs_reauth"
+    assert error["authorization_url"] == "https://example.com/oauth"
+
+
+def test_google_preflight_returns_missing_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    store_google_token(
+        monkeypatch,
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+    )
+    monkeypatch.setattr(oauth, "build_flow", lambda _settings, scopes=None: FakeFlow())
+    oauth.state_store._states.clear()
+
+    response = client.post("/tools/email/draft", json={"raw_base64": "aGVsbG8="})
+    assert response.status_code == 401
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "missing_scopes"
+    assert error["missing_scopes"] == [
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.send",
+    ]
+    assert error["authorization_url"] == "https://example.com/oauth"
+
+
+def test_chat_returns_google_preflight_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    oauth._token_store = None
+
+    monkeypatch.setattr("app.chat.plan_chat", lambda _settings, _payload: {
+        "response": "Posso procurar seus e-mails",
+        "action": {"tool": "email.search", "payload": {"query": "from:test"}},
+    })
+    monkeypatch.setattr("app.chat.check_google_connection", lambda _settings, _scopes: oauth.GoogleConnectionCheck(
+        status="needs_connection",
+        authorization_url="https://example.com/oauth",
+        state="state-123",
+        missing_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+    ))
+
+    response = client.post("/chat", json={"message": "procure emails"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "needs_connection"
+    assert body["google_connection"]["authorization_url"] == "https://example.com/oauth"
+    assert body["tool"] == "email.search"
 
 
 def test_responses_not_emotional_language() -> None:
@@ -700,7 +813,7 @@ def test_token_store_persists_to_disk(tmp_path: Path, monkeypatch: pytest.Monkey
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": datetime(2030, 1, 1, tzinfo=timezone.utc).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
@@ -1034,7 +1147,7 @@ def test_audit_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             "access_token": "access",
             "refresh_token": "refresh",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "scopes": ["scope.a"],
+            "scopes": list(DEFAULT_SCOPES),
         },
     )
 
