@@ -121,7 +121,6 @@ def email_read_message(payload: dict[str, object]) -> dict[str, object]:
 @app.post("/tools/email/read_latest")
 def email_read_latest_message(payload: dict[str, object]) -> dict[str, object]:
     settings = get_settings()
-    ensure_google_ready(settings, "email.read_latest")
     result = email_read_latest(settings, payload)
     record_event("email.read_latest", "ok", payload)
     return result

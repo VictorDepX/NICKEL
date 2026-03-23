@@ -225,9 +225,14 @@ def ensure_spotify_ready(settings: Settings) -> SpotifyConnectionCheck:
             access_token=settings.spotify_access_token,
         )
 
-    missing_config = _missing_spotify_config(settings)
     authorization_details = _authorization_details(settings)
-    if missing_config:
+    token: dict[str, Any] | None = None
+    if settings.oauth_token_key:
+        token_store = get_token_store(settings)
+        token = token_store.get(SPOTIFY_TOKEN_STORE_KEY)
+
+    missing_config = _missing_spotify_config(settings)
+    if not token and missing_config:
         return SpotifyConnectionCheck(
             status="needs_configuration",
             code="spotify_not_configured",
@@ -237,8 +242,6 @@ def ensure_spotify_ready(settings: Settings) -> SpotifyConnectionCheck:
             state=authorization_details and authorization_details["state"],
         )
 
-    token_store = get_token_store(settings)
-    token = token_store.get(SPOTIFY_TOKEN_STORE_KEY)
     if not token:
         return SpotifyConnectionCheck(
             status="needs_connection",
