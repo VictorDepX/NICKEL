@@ -352,7 +352,10 @@ def _summarize_error(exc: Exception) -> str:
 def _should_retry_http_error(exc: httpx.HTTPStatusError) -> bool:
     status_code = exc.response.status_code
     return status_code == 429 or status_code >= 500
+
+
 def _build_llm_payload(
+    settings: Settings,
     model: str,
     message: str,
     forced_tool: str | None,
@@ -367,13 +370,15 @@ def _build_llm_payload(
             history=history,
             use_native_tools=use_native_tools,
         ),
-        "temperature": 0.2,
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": _RESPONSE_SCHEMA,
-        },
+        "temperature": settings.llm_temperature,
+        "max_tokens": settings.llm_max_tokens,
+        "response_format": {"type": "json_object"},
     }
     if use_native_tools:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": _RESPONSE_SCHEMA,
+        }
         payload["tools"] = _TOOL_DEFINITIONS
         if forced_tool:
             payload["tool_choice"] = {
@@ -390,13 +395,14 @@ def generate_response(
     history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     base_url, api_key, model = _require_llm_settings(settings)
-    payload = {
-        "model": model,
-        "messages": _build_messages(message, forced_tool, history=history),
-        "temperature": settings.llm_temperature,
-        "max_tokens": settings.llm_max_tokens,
-        "response_format": {"type": "json_object"},
-    }
+    payload = _build_llm_payload(
+        settings=settings,
+        model=model,
+        message=message,
+        forced_tool=forced_tool,
+        history=history,
+        use_native_tools=settings.llm_enable_native_tools,
+    )
     retry_count = max(0, settings.llm_retry_count)
     backoff_ms = max(0, settings.llm_retry_backoff_ms)
 
@@ -461,65 +467,21 @@ def generate_response(
             status="error",
             error_summary="LLM response was empty.",
         )
-
-    primary_payload = _build_llm_payload(
-        model=model,
-        message=message,
-        forced_tool=forced_tool,
-        history=history,
-        use_native_tools=True,
-    )
-
-    try:
-        response = httpx.post(
-            f"{base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=primary_payload,
-            timeout=settings.llm_timeout_seconds,
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        fallback_payload = _build_llm_payload(
-            model=model,
-            message=message,
-            forced_tool=forced_tool,
-            history=history,
-            use_native_tools=False,
-        )
-        try:
-            response = httpx.post(
-                f"{base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json=fallback_payload,
-                timeout=settings.llm_timeout_seconds,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as fallback_exc:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "error": {
-                        "code": "llm_request_failed",
-                        "message": "Failed to call LLM.",
-                    }
-                },
-            ) from fallback_exc
-    except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=502,
             detail={
                 "error": {
-                    "code": "llm_request_failed",
-                    "message": "Failed to call LLM.",
+                    "code": "llm_bad_response",
+                    "message": "LLM response was empty.",
                 }
             },
         )
 
     try:
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        decoded = _decode_llm_json(content)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        decoded = _parse_llm_choice(data["choices"][0]["message"])
+        validated = _validate_llm_response(decoded)
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
         duration_ms = int((time.perf_counter() - start_time) * 1000)
         record_llm_event(
             model=model,
@@ -527,8 +489,6 @@ def generate_response(
             status="error",
             error_summary=_summarize_error(exc),
         )
-        decoded = _parse_llm_choice(data["choices"][0]["message"])
-    except (KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
         raise HTTPException(
             status_code=502,
             detail={
@@ -541,7 +501,7 @@ def generate_response(
 
     duration_ms = int((time.perf_counter() - start_time) * 1000)
     record_llm_event(model=model, duration_ms=duration_ms, status="ok")
-    return decoded
+    return validated
 
 
 def _parse_llm_choice(message: dict[str, Any]) -> dict[str, Any]:
@@ -575,6 +535,37 @@ def _parse_llm_choice(message: dict[str, Any]) -> dict[str, Any]:
         }
 
     raise json.JSONDecodeError("No content or structured tool call in response", str(message), 0)
+
+
+def _validate_llm_response(decoded: Any) -> dict[str, Any]:
+    if not isinstance(decoded, dict):
+        raise json.JSONDecodeError("LLM response was not a JSON object.", str(decoded), 0)
+
+    response_text = decoded.get("response")
+    if not isinstance(response_text, str):
+        raise json.JSONDecodeError("response must be a string", str(decoded), 0)
+
+    action = decoded.get("action")
+    if action is None:
+        return {"response": response_text, "action": None}
+
+    if not isinstance(action, dict):
+        raise json.JSONDecodeError("action must be null or an object", str(decoded), 0)
+
+    tool = action.get("tool")
+    payload = action.get("payload")
+    if not isinstance(tool, str) or not tool.strip():
+        raise json.JSONDecodeError("action.tool must be a non-empty string", str(action), 0)
+    if not isinstance(payload, dict):
+        raise json.JSONDecodeError("action.payload must be an object", str(action), 0)
+
+    return {
+        "response": response_text,
+        "action": {
+            "tool": tool,
+            "payload": payload,
+        },
+    }
 
 
 def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
