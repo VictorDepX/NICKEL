@@ -751,6 +751,70 @@ def test_configure_stores_configures_each_store_once(monkeypatch: pytest.MonkeyP
     assert calls == {"pending": 1, "notes": 1, "tasks": 1, "memory": 1, "audit": 1}
 
 
+def test_chat_plan_uses_first_llm_success_without_second_incompatible_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeLLMResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"response": "Plano pronto", "action": None})
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(*args: object, **kwargs: object) -> FakeLLMResponse:
+        calls.append(kwargs)
+        return FakeLLMResponse()
+
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_ENABLE_NATIVE_TOOLS", "false")
+    monkeypatch.setattr("app.llm.httpx.post", fake_post)
+
+    response = client.post("/chat/plan", json={"message": "Oi"})
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Plano pronto"
+    assert len(calls) == 1
+    sent_payload = calls[0]["json"]
+    assert sent_payload["response_format"] == {"type": "json_object"}
+    assert "tools" not in sent_payload
+    assert "tool_choice" not in sent_payload
+
+
+def test_chat_plan_sensitive_action_requires_confirmation_without_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("sensitive tool should not execute during planning")
+
+    monkeypatch.setattr(
+        "app.chat.generate_response",
+        lambda *_args, **_kwargs: {
+            "response": "Posso enviar esse email assim que você confirmar.",
+            "action": {
+                "tool": "email.send",
+                "payload": {"raw_base64": "aGVsbG8=", "user_id": "me"},
+            },
+        },
+    )
+    monkeypatch.setattr("app.gmail.build", _fail)
+
+    response = client.post("/chat/plan", json={"message": "Envie este email"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action"]["tool"] == "email.send"
+    assert body["requires_confirmation"] is True
+    assert body["response"] == "Posso enviar esse email assim que você confirmar."
+
+
 def test_routes_call_underlying_handlers_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"tasks": 0, "play": 0, "pause": 0, "skip": 0, "audit": 0}
 

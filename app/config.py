@@ -19,6 +19,7 @@ class Settings:
     llm_temperature: float
     llm_retry_count: int
     llm_retry_backoff_ms: int
+    llm_enable_native_tools: bool
     token_store_path: str | None
     pending_actions_path: str | None
     notes_store_path: str | None
@@ -69,6 +70,10 @@ def get_settings() -> Settings:
         llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
         llm_retry_count=int(os.getenv("LLM_RETRY_COUNT", "2")),
         llm_retry_backoff_ms=int(os.getenv("LLM_RETRY_BACKOFF_MS", "250")),
+        llm_enable_native_tools=(
+            os.getenv("LLM_ENABLE_NATIVE_TOOLS", "false").strip().lower()
+            in {"1", "true", "yes", "on"}
+        ),
         token_store_path=os.getenv("TOKEN_STORE_PATH"),
         pending_actions_path=os.getenv("PENDING_ACTIONS_PATH"),
         notes_store_path=os.getenv("NOTES_STORE_PATH"),
