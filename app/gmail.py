@@ -111,6 +111,58 @@ def read(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def read_latest(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    credentials = require_google_connection(settings, GMAIL_READ_SCOPES)
+    user_id = payload.get("user_id", "me")
+    query = payload.get("query", "")
+
+    try:
+        service = build("gmail", "v1", credentials=credentials)
+        response = (
+            service.users()
+            .messages()
+            .list(userId=user_id, q=query, maxResults=1)
+            .execute()
+        )
+    except HttpError as exc:
+        raise _handle_http_error(exc, "email_read_latest_failed", "Failed to find latest email.") from exc
+
+    messages = response.get("messages", [])
+    if not messages:
+        return {
+            "status": "ok",
+            "data": {
+                "message": None,
+                "decoded_body": None,
+                "empty_mailbox": True,
+                "query": query,
+            },
+        }
+
+    latest_message_id = messages[0].get("id")
+    if not latest_message_id:
+        return {
+            "status": "ok",
+            "data": {
+                "message": None,
+                "decoded_body": None,
+                "empty_mailbox": True,
+                "query": query,
+            },
+        }
+
+    detailed_result = read(
+        settings,
+        {
+            "message_id": latest_message_id,
+            "user_id": user_id,
+        },
+    )
+    detailed_result["data"]["query"] = query
+    detailed_result["data"]["empty_mailbox"] = False
+    return detailed_result
+
+
 def _require_raw_message(payload: dict[str, Any]) -> str:
     raw = payload.get("raw_base64")
     if raw:
