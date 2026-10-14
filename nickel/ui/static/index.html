@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NICKEL</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">NICKEL <span class="version">v2</span></div>
+    <ul class="status" id="status" aria-label="Estado dos serviços"></ul>
+  </header>
+
+  <main class="layout">
+    <section class="conversation" aria-labelledby="conv-title">
+      <h2 id="conv-title" class="sr-only">Conversa</h2>
+      <ol class="messages" id="messages" aria-live="polite"></ol>
+      <form class="composer" id="composer">
+        <label for="input" class="sr-only">Mensagem</label>
+        <textarea id="input" rows="1" placeholder="Escreva para o NICKEL… (Enter envia, Shift+Enter quebra linha)"></textarea>
+        <button type="submit" id="send">Enviar</button>
+      </form>
+    </section>
+
+    <aside class="side">
+      <section class="panel" aria-labelledby="pending-title">
+        <h2 id="pending-title">Confirmações</h2>
+        <ul id="pending" class="list"></ul>
+      </section>
+
+      <section class="panel" aria-labelledby="reminders-title">
+        <h2 id="reminders-title">Lembretes</h2>
+        <ul id="reminders" class="list"></ul>
+      </section>
+
+      <section class="panel" aria-labelledby="connections-title">
+        <h2 id="connections-title">Conexões</h2>
+        <ul id="connections" class="list"></ul>
+      </section>
+
+      <section class="panel" aria-labelledby="memory-title">
+        <h2 id="memory-title">Memória</h2>
+        <ul id="memory" class="list"></ul>
+      </section>
+
+      <details class="panel" id="audit-panel">
+        <summary><h2>Atividade</h2></summary>
+        <ul id="audit" class="list compact"></ul>
+      </details>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
