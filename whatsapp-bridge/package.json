@@ -1,0 +1,20 @@
+{
+  "name": "nickel-whatsapp-bridge",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Ponte entre o WhatsApp (open-wa v5) e a API local do NICKEL.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@open-wa/client": "5.6.0",
+    "@open-wa/core": "5.6.0",
+    "@open-wa/driver-puppeteer": "5.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

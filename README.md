@@ -1,199 +1,116 @@
-# NICKEL v1.0
+# NICKEL v2
 
-Assistente pessoal orientado a ferramentas, com API FastAPI e CLI, integrado a Google Workspace (Gmail + Calendar), Spotify, memória opt-in, auditoria e fluxo de confirmações para ações sensíveis.
+Assistente pessoal que roda na sua máquina. Usa Qwen via Ollama, conversa pelo WhatsApp (texto, áudio e foto) e por voz no PC (push-to-talk), e tem uma UI local para histórico e confirmações.
 
-## Visão geral
+- **Skills:** Spotify, reconhecimento de música (Spotify ou YouTube), pensamentos no Obsidian, lembretes que avisam no celular, Gmail, Google Agenda e memória opt-in.
+- **Decisões de arquitetura e trade-offs:** [`docs/adr/0001-arquitetura-v2.md`](docs/adr/0001-arquitetura-v2.md).
 
-O NICKEL foi projetado para separar **planejamento** e **execução** de ações:
-- Planeja com LLM (`/chat/plan`)
-- Executa ação explicitamente (`/chat/execute`) ou via fluxo compatível (`/chat`)
-- Exige confirmação para operações de escrita críticas (`/confirm` e `/cancel`)
-
-## Principais recursos
-
-- **Google Workspace**
-  - Gmail: pesquisa, leitura, rascunho e envio
-  - Calendar: listagem, criação e alteração de eventos
-- **Spotify**
-  - Play, pause e skip
-  - OAuth dedicado do Spotify + fallback por token manual
-- **Memória opt-in** (`/memory/ask`, `/memory/confirm`, `GET /memory`)
-- **Auditoria** (`GET /audit`)
-- **Persistência local** de tokens, ações pendentes, notas, tarefas, memória e trilha de auditoria
+```
+WhatsApp ─┐                                   ┌─ Spotify / ShazamIO / YouTube
+Voz (PC) ─┼─► Agente (Qwen + tools) ─► Skills ─┼─ Obsidian (vault via Syncthing)
+UI local ─┘        │                           └─ Gmail / Google Agenda
+                   └─ SQLite: conversa, confirmações, lembretes, memória, tokens, auditoria
+```
 
 ## Requisitos
 
-- Python 3.11+
+- Linux com GPU NVIDIA de 24 GB (o `qwen3.6:27b` ocupa ~19 GB).
+- Python 3.11+, Node.js 20+, ffmpeg.
+- Spotify Premium: o Development Mode da API exige isso desde fev/2026.
+- Syncthing sincronizando o vault `Editora` entre o Windows e esta máquina.
 
 ## Instalação
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+git checkout v2
+./scripts/install.sh          # pacotes, Ollama + modelo, .venv, voz do Piper, bridge, .env com chaves
+$EDITOR .env                  # OBSIDIAN_VAULT_PATH, Google, Spotify
+./scripts/install-services.sh # serviços systemd de usuário + comando nickel-listen
 ```
 
-## Configuração de ambiente
+Depois:
 
-> **Importante:** nunca commite credenciais reais. Use valores de exemplo no `.env` e segredos reais apenas no ambiente de execução.
+1. **Pareie o WhatsApp.** Rode `journalctl --user -fu nickel-whatsapp` e escaneie o QR em *WhatsApp → Aparelhos conectados → Conectar um aparelho*. A sessão fica em `data/wa-session/`.
+2. **Converse.** No celular, abra a conversa *"Você"* (mensagem para você mesmo). O NICKEL lê só esse chat e responde nele.
+3. **Conecte Google e Spotify.** Abra `http://127.0.0.1:8000` e use *Conexões → Conectar*.
+4. **Configure o atalho de voz.**
+   - GNOME: *Configurações → Teclado → Atalhos personalizados*, comando `~/.local/bin/nickel-listen`.
+   - KDE: *Atalhos personalizados*, mesmo comando.
+   - Uso: aperte uma vez para falar. Ele para sozinho após 1,5 s de silêncio, ou quando você aperta de novo. Enquanto ele fala, apertar interrompe.
+5. **Confira.** `nickel doctor` lista o que falta.
 
-```bash
-# Google OAuth
-export GOOGLE_CLIENT_ID="your_google_client_id"
-export GOOGLE_CLIENT_SECRET="your_google_client_secret"
-export GOOGLE_REDIRECT_URI="http://localhost:8000/auth/google/callback"
-export GOOGLE_SCOPES="https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.compose,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/calendar.readonly,https://www.googleapis.com/auth/calendar.events"
+### Google (Gmail + Agenda)
 
-# Chave para criptografia de tokens OAuth no armazenamento local
-export OAUTH_TOKEN_KEY="your_fernet_key"
-
-# LLM provider
-export LLM_BASE_URL="https://api.groq.com/openai/v1"
-export LLM_API_KEY="your_llm_api_key"
-export LLM_MODEL="llama-3.1-8b-instant"
-export LLM_TIMEOUT_SECONDS="60"
-
-# Persistência local
-export TOKEN_STORE_PATH="./data/token_store.json"
-export PENDING_ACTIONS_PATH="./data/pending_actions.json"
-export NOTES_STORE_PATH="./data/notes.json"
-export TASKS_STORE_PATH="./data/tasks.json"
-export MEMORY_STORE_PATH="./data/memory.json"
-export AUDIT_STORE_PATH="./data/audit.json"
-
-# Spotify OAuth
-export SPOTIFY_CLIENT_ID="your_spotify_client_id"
-export SPOTIFY_CLIENT_SECRET="your_spotify_client_secret"
-export SPOTIFY_REDIRECT_URI="http://localhost:8000/auth/spotify/callback"
-export SPOTIFY_SCOPES="user-read-playback-state,user-modify-playback-state,user-read-currently-playing"
-
-# Spotify opcional (modo manual/fallback)
-export SPOTIFY_ACCESS_TOKEN="optional_spotify_access_token"
-export SPOTIFY_DEVICE_ID="optional_device_id"
-export SPOTIFY_BASE_URL="https://api.spotify.com/v1"
-```
-
-### Gerando `OAUTH_TOKEN_KEY`
-
-```bash
-python - <<'PY'
-from cryptography.fernet import Fernet
-print(Fernet.generate_key().decode("utf-8"))
-PY
-```
-
-## Execução
-
-### API + CLI (modo rápido)
-
-```bash
-make start
-```
-
-## Teste conversacional pela CLI
-
-```bash
-export NICKEL_API_BASE_URL="http://localhost:8000"
-python -m cli.main
-```
-
-A CLI mantém histórico local para conversas multi-turno e suporta confirmações com `/confirm` e `/cancel`.
-
-## OAuth Google
-
-- Inicie o fluxo em `/auth/google/start`.
-- Complete o fluxo em `/auth/google/callback?code=...&state=...`.
-
-## Calendar (read-only)
-
-- Liste eventos em `/tools/calendar/list_events`.
-
-## Email (read-only)
-
-- Pesquise emails em `/tools/email/search`.
-- Leia emails em `/tools/email/read`.
-
-## Email (write)
-
-- Crie rascunho em `/tools/email/draft` (sem confirmação).
-- Envie email em `/tools/email/send` (com confirmação).
-
-## Chat (LLM)
-
-- Compatibilidade: continue usando `POST /chat` com `{ "message": "..." }`.
-- Novo planejamento: `POST /chat/plan` retorna plano estruturado com `response`, `action`, `confidence`, `requires_confirmation` e **não executa tool**.
-- Nova execução: `POST /chat/execute` executa uma ação já planejada (ou responde normalmente quando `action` é `null`).
-- Fluxo unificado: internamente, `/chat` usa `plan -> execute`.
-- Para manter contexto entre turnos, envie também `history`, por exemplo `{ "message": "...", "history": [{"role":"user","content":"..."},{"role":"assistant","content":"..."}] }`.
-- Benefícios do split plan/execute: depuração mais simples, UI mais previsível e menor acoplamento com o provider de LLM.
-### Execução separada
-
-```bash
-make api   # API em http://localhost:8000
-make cli   # CLI conectada à API
-```
-
-## Fluxos OAuth
-
-### Google
-- Iniciar: `GET /auth/google/start`
-- Callback: `GET /auth/google/callback?code=...&state=...`
+1. No Google Cloud Console, crie um projeto e ative a Gmail API e a Google Calendar API.
+2. Crie um *OAuth client ID* do tipo **Web application**, com o redirect `http://localhost:8000/auth/google/callback`.
+3. Coloque o ID e o segredo no `.env`.
+4. Na tela de consentimento, adicione seu e-mail como usuário de teste.
 
 ### Spotify
-- Iniciar: `GET /auth/spotify/start`
-- Callback: `GET /auth/spotify/callback?code=...&state=...`
-- Alternativa: usar `SPOTIFY_ACCESS_TOKEN` manualmente
 
-## Endpoints de ferramentas
+1. Crie um app em developer.spotify.com.
+2. Cadastre o redirect **`http://127.0.0.1:8000/auth/spotify/callback`**. O Spotify não aceita `localhost`.
+3. Coloque o ID e o segredo no `.env`.
+4. O app fica em Development Mode, ligado à sua conta Premium.
 
-### Calendar
-- `POST /tools/calendar/list_events`
-- `POST /tools/calendar/create_event` *(requer confirmação)*
-- `POST /tools/calendar/modify_event` *(requer confirmação)*
+### Obsidian
 
-### Email
-- `POST /tools/email/search`
-- `POST /tools/email/read`
-- `POST /tools/email/draft`
-- `POST /tools/email/send` *(requer confirmação)*
+As notas vão para `06 Pensamentos/` no vault.
 
-### Spotify
-- `POST /tools/spotify/play`
-- `POST /tools/spotify/pause`
-- `POST /tools/spotify/skip`
+- Cada nota tem frontmatter (`type: pensamento`, `categoria`, `fonte`, `status: inbox`) e guarda o texto original num callout recolhido.
+- O NICKEL só **cria** arquivos, nunca edita os existentes, para não gerar conflito no Syncthing.
+- O índice `06 Pensamentos/Pensamentos.md` usa Dataview e já está ligado à `Home`.
 
-### Notes / Tasks
-- `POST /tools/notes/create` *(requer confirmação)*
-- `POST /tools/tasks/create` *(requer confirmação)*
-- `POST /tools/tasks/list`
+## Uso
 
-## Chat
+| Você diz/escreve | O que acontece |
+|---|---|
+| "me lembra de pagar a luz amanhã às 9" | Lembrete local + evento no Google Agenda. O celular avisa mesmo com o PC desligado; com o PC ligado, chega também no WhatsApp |
+| *áudio de uma música tocando* | ShazamIO identifica e devolve o link do Spotify (ou do YouTube) |
+| "que música é essa?" (pela voz, no PC) | Grava 10 s do microfone e identifica |
+| "toca Clube da Esquina" | Busca e toca no dispositivo Spotify ativo |
+| "anota: …" ou um pensamento solto | Nota organizada no Obsidian |
+| *foto* + "o que é isso?" | O Qwen analisa a imagem |
+| "manda um e-mail pra Ana dizendo…" | Pede confirmação (*sim/não*) antes de enviar |
 
-- Compatível: `POST /chat`
-- Planejamento sem execução: `POST /chat/plan`
-- Execução explícita: `POST /chat/execute`
-- Suporte a histórico via `history` no payload
+Confirmações podem ser respondidas no WhatsApp, pela voz ou na UI. Política completa: [`docs/Nickel/policy_confirmation.md`](docs/Nickel/policy_confirmation.md).
 
-## Confirmação de ações
+Comandos: `nickel serve` · `nickel listen` · `nickel chat` (texto no terminal) · `nickel doctor` · `nickel keys`.
 
-Ações de escrita sensíveis não executam imediatamente:
-1. API cria `pending_action`
-2. Cliente confirma via `POST /confirm` com `action_id` e `confirmed: true`
-3. Ou cancela via `POST /cancel`
+## Estrutura
 
-## Observabilidade
-
-- **Memória opt-in:** `/memory/ask`, `/memory/confirm`, `GET /memory`
-- **Auditoria:** `GET /audit`
-
-## Testes
-
-```bash
-pytest
+```
+nickel/
+  core/          agente, cliente Ollama, registro de skills, SQLite, persona
+  skills/        uma tool por função; cada módulo expõe register(registry)
+  integrations/  Google, Spotify, música, Obsidian
+  channels/      WhatsApp e voz
+  speech/        faster-whisper, Piper, microfone
+  ui/static/     UI local
+whatsapp-bridge/ open-wa v5 → HTTP local
+docs/Nickel/     persona e políticas (canônicas)
+docs/adr/        decisões de arquitetura
 ```
 
----
+**Nova skill:** crie `nickel/skills/<nome>.py` com `register(registry)`, inclua em `SKILL_MODULES` e atualize `docs/Nickel/tool_contracts.md`.
 
-## Versão
+## Desenvolvimento
 
-Este README descreve o **NICKEL v1.0**.
+```bash
+.venv/bin/pytest                 # Python
+(cd whatsapp-bridge && npm test) # filtros da bridge
+```
+
+Os testes usam dublês para o LLM, o WhatsApp, o Spotify e o reconhecimento; não precisam de GPU nem de rede.
+
+## Problemas comuns
+
+- **Falta VRAM (CUDA OOM).** Reduza `LLM_NUM_CTX` ou mova o STT para a CPU com `STT_DEVICE=cpu` e `STT_COMPUTE_TYPE=int8`.
+- **Resposta lenta na voz.** Teste `LLM_MODEL=qwen3.5:9b`.
+- **WhatsApp desconectou.** Rode `systemctl --user restart nickel-whatsapp` e, se pedir, escaneie o QR de novo. O open-wa é um cliente não oficial: use com moderação.
+- **Notificação ou áudio não saem pelo serviço.** Rode `systemctl --user import-environment DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS` e reinicie o `nickel`.
+- **Spotify retorna "Nenhum dispositivo".** Abra o Spotify em algum aparelho, ou defina `SPOTIFY_DEVICE_NAME`.
+
+## Licença
+
+MIT.

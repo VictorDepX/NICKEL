@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nickel"
+version = "2.0.0"
+description = "Assistente pessoal local: Qwen via Ollama, voz, WhatsApp e skills."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "httpx>=0.27",
+  "python-dotenv>=1.0",
+  "cryptography>=43",
+  "google-auth>=2.35",
+  "google-auth-oauthlib>=1.2",
+  "google-api-python-client>=2.147",
+]
+
+[project.optional-dependencies]
+voice = [
+  "faster-whisper>=1.1",
+  "piper-tts>=1.3",
+  "sounddevice>=0.5",
+  "numpy>=1.26",
+]
+music = [
+  "shazamio>=0.7",
+  "yt-dlp>=2025.1.1",
+]
+dev = [
+  "pytest>=8.3",
+  "pyflakes>=3.2",
+]
+all = ["nickel[voice,music]"]
+
+[project.scripts]
+nickel = "nickel.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["nickel*"]
+
+[tool.setuptools.package-data]
+"nickel.ui" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

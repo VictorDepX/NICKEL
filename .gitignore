@@ -1,3 +1,10 @@
-__pycache__/
-.pytest_cache/
 .venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/
+models/
+whatsapp-bridge/node_modules/
+whatsapp-bridge/session/
+*.egg-info/
