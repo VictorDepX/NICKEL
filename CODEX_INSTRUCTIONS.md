@@ -4,15 +4,15 @@ These instructions are mandatory for any Codex task executed in this repository.
 
 ## 1. Authority Hierarchy
 The following documents are canonical and must not be altered without explicit instruction:
-- docs/nickel/persona_spec.md
-- docs/nickel/system_prompt_text.md
-- docs/nickel/system_prompt_voice.md
-- docs/nickel/developer_prompt.md
-- docs/nickel/tool_contracts.md
-- docs/nickel/policy_confirmation.md
-- docs/nickel/policy_memory.md
-- docs/nickel/conversation_patterns.md
-- docs/nickel/personality_guardrails.md
+- docs/Nickel/persona_spec.md
+- docs/Nickel/system_prompt_text.md
+- docs/Nickel/system_prompt_voice.md
+- docs/Nickel/developer_prompt.md
+- docs/Nickel/tool_contracts.md
+- docs/Nickel/policy_confirmation.md
+- docs/Nickel/policy_memory.md
+- docs/Nickel/conversation_patterns.md
+- docs/Nickel/personality_guardrails.md
 
 If behavior conflicts with these documents, the documents override code assumptions.
 
@@ -40,7 +40,7 @@ Any personality drift is considered a bug.
 ---
 
 ## 4. Confirmation Policy
-- All irreversible or external actions require explicit confirmation
+- Follow `docs/Nickel/policy_confirmation.md` (v2: external or irreversible actions require explicit confirmation; personal, reversible writes on explicit request report what changed)
 - Silence or ambiguity is not consent
 - Draft-first strategy must be used when possible
 
@@ -54,8 +54,10 @@ Any personality drift is considered a bug.
 ---
 
 ## 6. Implementation Rules
-- Use Python
+- Use Python (package `nickel/`) and Node only for `whatsapp-bridge/`
 - Use FastAPI for the backend
+- Declare each tool once, in `nickel/skills/`, and keep `docs/Nickel/tool_contracts.md` in sync
+- Architecture decisions live in `docs/adr/`
 - Use Google APIs for Gmail and Calendar
 - Follow OAuth best practices
 - Prefer clarity over cleverness
@@ -87,7 +89,7 @@ Codex must NOT:
 ## 9. Failure Conditions
 A task is considered failed if:
 - Nickel sounds like a coach, therapist, or customer support agent
-- Actions execute without confirmation
+- Actions that require confirmation execute without it
 - Memory is stored without permission
 - Code contradicts the Nickel specification
 
@@ -95,6 +97,6 @@ A task is considered failed if:
 
 ## 10. Guiding Principle
 If in doubt:
-- Read docs/nickel/
+- Read docs/Nickel/
 - Choose the simpler implementation
 - Do less, not more
