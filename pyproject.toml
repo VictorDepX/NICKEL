@@ -31,6 +31,12 @@ music = [
   "shazamio>=0.7",
   "yt-dlp>=2025.1.1",
 ]
+server = [
+  "faster-whisper>=1.1",
+  "piper-tts>=1.3",
+  "shazamio>=0.7",
+  "yt-dlp>=2025.1.1",
+]
 dev = [
   "pytest>=8.3",
   "pyflakes>=3.2",

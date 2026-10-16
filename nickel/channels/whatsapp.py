@@ -13,12 +13,14 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from nickel.config import Settings
-from nickel.core.agent import Agent, Turn
+from nickel.core.agent import Agent, AgentReply, Turn
 
 if TYPE_CHECKING:  # pragma: no cover
     from nickel.services import Services
 
 log = logging.getLogger(__name__)
+
+SLOW_NOTICE = "Um momento. O modelo pode estar iniciando."
 
 AUDIO_TYPES = {"ptt", "audio"}
 IMAGE_TYPES = {"image"}
@@ -166,7 +168,7 @@ class WhatsAppChannel:
             if isinstance(turn, str):
                 reply_text = turn
             else:
-                reply = await self.agent.handle(turn)
+                reply = await self._run_agent(turn)
                 reply_text = reply.text
                 if (
                     self.services.settings.wa_voice_replies
@@ -180,6 +182,17 @@ class WhatsAppChannel:
         if client is not None:
             await client.send_text(reply_text)
         return reply_text
+
+    async def _run_agent(self, turn: Turn) -> AgentReply:
+        """Roda o agente; se demorar (partida a frio no RunPod), avisa uma vez no WhatsApp."""
+        task = asyncio.create_task(self.agent.handle(turn))
+        wait = self.services.settings.wa_slow_notice_seconds
+        client = self.services.whatsapp
+        if wait > 0 and client is not None:
+            done, _pending = await asyncio.wait({task}, timeout=wait)
+            if not done:
+                await client.send_text(SLOW_NOTICE)
+        return await task
 
     async def _send_voice(self, text: str) -> None:
         from nickel.speech.tts import wav_to_ogg_opus

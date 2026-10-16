@@ -42,13 +42,17 @@ class Settings:
     data_dir: Path = Path("data")
     timezone: str = "America/Sao_Paulo"
 
-    # LLM (Ollama)
+    # LLM: "ollama" (GPU local) ou "openai" (RunPod Serverless / vLLM / outro compatível)
+    llm_provider: str = "ollama"
     llm_base_url: str = "http://127.0.0.1:11434"
+    llm_api_key: str | None = None
     llm_model: str = "qwen3.6:27b"
     llm_num_ctx: int = 16384
+    llm_max_tokens: int = 2048
     llm_temperature: float = 0.3
     llm_think: bool = False
     llm_timeout_seconds: float = 180.0
+    llm_retries: int = 2
     llm_keep_alive: str = "30m"
     agent_max_steps: int = 6
     agent_history_messages: int = 16
@@ -73,6 +77,7 @@ class Settings:
     # WhatsApp
     wa_bridge_url: str = "http://127.0.0.1:8002"
     wa_voice_replies: bool = False
+    wa_slow_notice_seconds: float = 8.0
 
     # Obsidian
     obsidian_vault_path: Path | None = None
@@ -122,12 +127,16 @@ class Settings:
             port=_int(env, "NICKEL_PORT", cls.port),
             data_dir=Path(_str(env, "NICKEL_DATA_DIR", "data")),
             timezone=_str(env, "NICKEL_TIMEZONE", cls.timezone),
+            llm_provider=_str(env, "LLM_PROVIDER", cls.llm_provider),
             llm_base_url=_str(env, "LLM_BASE_URL", cls.llm_base_url),
+            llm_api_key=_str(env, "LLM_API_KEY"),
             llm_model=_str(env, "LLM_MODEL", cls.llm_model),
             llm_num_ctx=_int(env, "LLM_NUM_CTX", cls.llm_num_ctx),
+            llm_max_tokens=_int(env, "LLM_MAX_TOKENS", cls.llm_max_tokens),
             llm_temperature=_float(env, "LLM_TEMPERATURE", cls.llm_temperature),
             llm_think=_bool(env, "LLM_THINK", cls.llm_think),
             llm_timeout_seconds=_float(env, "LLM_TIMEOUT_SECONDS", cls.llm_timeout_seconds),
+            llm_retries=_int(env, "LLM_RETRIES", cls.llm_retries),
             llm_keep_alive=_str(env, "LLM_KEEP_ALIVE", cls.llm_keep_alive),
             agent_max_steps=_int(env, "AGENT_MAX_STEPS", cls.agent_max_steps),
             agent_history_messages=_int(env, "AGENT_HISTORY_MESSAGES", cls.agent_history_messages),
@@ -144,6 +153,7 @@ class Settings:
             spotify_market=_str(env, "SPOTIFY_MARKET", cls.spotify_market),
             wa_bridge_url=_str(env, "WA_BRIDGE_URL", cls.wa_bridge_url),
             wa_voice_replies=_bool(env, "WA_VOICE_REPLIES", cls.wa_voice_replies),
+            wa_slow_notice_seconds=_float(env, "WA_SLOW_NOTICE_SECONDS", cls.wa_slow_notice_seconds),
             obsidian_vault_path=Path(vault).expanduser() if vault else None,
             obsidian_notes_dir=_str(env, "OBSIDIAN_NOTES_DIR", cls.obsidian_notes_dir),
             voice_enabled=_bool(env, "VOICE_ENABLED", cls.voice_enabled),

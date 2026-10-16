@@ -71,7 +71,8 @@ def cmd_keys(_args: argparse.Namespace) -> int:
 
 
 async def _doctor() -> int:
-    from nickel.core.llm import OllamaClient
+    from nickel.core.host import is_oracle_cloud, memory_used_percent
+    from nickel.core.llm import LLMError, make_llm
     from nickel.services import module_available
 
     settings = load_settings()
@@ -82,30 +83,59 @@ async def _doctor() -> int:
         problems += 0 if ok else 1
         print(f"[{'ok' if ok else '!!'}] {label}" + (f" — {hint}" if hint and not ok else ""))
 
-    client = OllamaClient(settings)
-    health = await client.health()
-    await client.aclose()
-    line(health.get("ok", False), f"Ollama em {settings.llm_base_url}", "rode `ollama serve`")
-    line(bool(health.get("model_present")), f"Modelo {settings.llm_model}", f"rode `ollama pull {settings.llm_model}`")
+    provider = settings.llm_provider.lower()
+    health: dict = {}
+    try:
+        client = make_llm(settings)
+    except LLMError as exc:
+        line(False, f"LLM ({provider})", str(exc))
+    else:
+        health = await client.health()
+        await client.aclose()
+    if provider == "ollama":
+        line(health.get("ok", False), f"Ollama em {settings.llm_base_url}", "rode `ollama serve`")
+        line(bool(health.get("model_present")), f"Modelo {settings.llm_model}", f"rode `ollama pull {settings.llm_model}`")
+    elif health:
+        label = "Endpoint RunPod" if health.get("provider") == "runpod" else f"Provedor em {settings.llm_base_url}"
+        line(health.get("ok", False), f"{label} ({settings.llm_model})", health.get("detail") or "confira LLM_BASE_URL e LLM_API_KEY")
+        if health.get("ok") and health.get("detail"):
+            print(f"     {health['detail']}")
+        if health.get("provider") == "openai":
+            line(bool(health.get("model_present")), f"Modelo {settings.llm_model} no provedor", "confira LLM_MODEL")
+
     line(bool(settings.oauth_token_key), "OAUTH_TOKEN_KEY", "gere com `nickel keys`")
     line(bool(settings.bridge_token), "BRIDGE_TOKEN", "gere com `nickel keys`")
     vault_ok = bool(settings.obsidian_vault_path and settings.obsidian_vault_path.is_dir())
     line(vault_ok, f"Vault Obsidian ({settings.obsidian_vault_path})", "ajuste OBSIDIAN_VAULT_PATH / Syncthing")
-    line(module_available("faster_whisper"), "faster-whisper (STT)", "pip install -e '.[voice]'")
-    line(module_available("piper"), "piper-tts (TTS)", "pip install -e '.[voice]'")
-    voice_ok = bool(settings.tts_voice_path and settings.tts_voice_path.exists())
-    line(voice_ok, f"Voz do Piper ({settings.tts_voice_path})", "rode scripts/install.sh")
-    line(module_available("sounddevice"), "sounddevice (microfone)", "pip install -e '.[voice]'")
+    line(module_available("faster_whisper"), f"faster-whisper (STT {settings.stt_model}, {settings.stt_device})", "pip install -e '.[server]'")
+    if settings.voice_enabled or settings.wa_voice_replies:
+        line(module_available("piper"), "piper-tts (TTS)", "pip install -e '.[voice]'")
+        voice_ok = bool(settings.tts_voice_path and settings.tts_voice_path.exists())
+        line(voice_ok, f"Voz do Piper ({settings.tts_voice_path})", "baixe a voz (veja o README)")
+    if settings.voice_enabled:
+        line(module_available("sounddevice"), "sounddevice (microfone)", "pip install -e '.[voice]'")
+    if settings.voice_notify:
+        line(bool(shutil.which("notify-send")), "notify-send", "sudo apt install libnotify-bin")
     line(module_available("shazamio"), "shazamio (música)", "pip install -e '.[music]'")
     line(module_available("yt_dlp"), "yt-dlp (YouTube)", "pip install -e '.[music]'")
     line(bool(shutil.which("ffmpeg")), "ffmpeg", "sudo apt install ffmpeg")
-    line(bool(shutil.which("notify-send")), "notify-send", "sudo apt install libnotify-bin")
     try:
         response = httpx.get(f"{settings.wa_bridge_url}/health", timeout=3)
         ready = response.json().get("ready", False)
     except (httpx.HTTPError, ValueError):
         ready = False
-    line(ready, f"Bridge WhatsApp ({settings.wa_bridge_url})", "inicie `npm start` em whatsapp-bridge/")
+    line(ready, f"Bridge WhatsApp ({settings.wa_bridge_url})", "veja `journalctl --user -u nickel-whatsapp`")
+
+    if is_oracle_cloud():
+        used = memory_used_percent()
+        if used is not None:
+            line(
+                used >= 25,
+                f"Memória em uso na VM Oracle: {used:.0f}%",
+                "abaixo de 20% por 7 dias (com CPU e rede baixas) a Oracle pode recuperar a VM; "
+                "reduza a RAM da instância ou veja docs/deploy/oracle-runpod.md",
+            )
+
     print("\nTudo certo." if problems == 0 else f"\n{problems} item(ns) pendente(s).")
     return 0 if problems == 0 else 1
 

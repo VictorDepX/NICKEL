@@ -8,7 +8,7 @@ from typing import Any
 
 from nickel.config import Settings
 from nickel.core.db import Database
-from nickel.core.llm import LLMClient, OllamaClient
+from nickel.core.llm import LLMClient, make_llm
 from nickel.core.stores import (
     AuditLog,
     ConversationStore,
@@ -82,7 +82,7 @@ def build_services(settings: Settings, llm: LLMClient | None = None) -> Services
     from nickel.integrations.spotify import SpotifyClient
     from nickel.skills.reminders import ReminderService
 
-    services = Services.core(settings, llm or OllamaClient(settings))
+    services = Services.core(settings, llm or make_llm(settings))
 
     services.google = GoogleAuth(settings, services.tokens)
     services.gmail = GmailService(services.google)

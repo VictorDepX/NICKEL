@@ -198,7 +198,7 @@ class Agent:
                     "role": "assistant",
                     "content": reply.content or "",
                     "tool_calls": [
-                        {"type": "function", "function": {"name": call.name, "arguments": call.arguments}}
+                        {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}}
                         for call in reply.tool_calls
                     ],
                 }
@@ -224,7 +224,9 @@ class Agent:
                     else:
                         result = await self._run_tool(tool.name, ctx, arguments)
                         executed.append({"name": tool.name, "ok": result.ok, "summary": result.summary})
-                messages.append({"role": "tool", "tool_name": call.name, "content": result.to_llm()})
+                messages.append(
+                    {"role": "tool", "tool_call_id": call.id, "tool_name": call.name, "content": result.to_llm()}
+                )
 
         last = executed[-1]["summary"] if executed else "nenhuma ação concluída"
         return AgentReply(
