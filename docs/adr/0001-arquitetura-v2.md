@@ -1,6 +1,6 @@
 # ADR-0001: Arquitetura do NICKEL v2 — assistente local com Qwen, voz e WhatsApp
 
-**Status:** Aceito
+**Status:** Aceito (implantação revista pelo [ADR-0002](0002-implantacao-oracle-runpod.md))
 **Data:** 2026-10-14
 **Decisores:** Victor Daniel
 

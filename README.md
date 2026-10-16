@@ -1,9 +1,9 @@
 # NICKEL v2
 
-Assistente pessoal que roda na sua máquina. Usa Qwen via Ollama, conversa pelo WhatsApp (texto, áudio e foto) e por voz no PC (push-to-talk), e tem uma UI local para histórico e confirmações.
+Assistente pessoal com Qwen. Conversa pelo WhatsApp (texto, áudio e foto) e por voz no PC (push-to-talk), e tem uma UI local para histórico e confirmações.
 
 - **Skills:** Spotify, reconhecimento de música (Spotify ou YouTube), pensamentos no Obsidian, lembretes que avisam no celular, Gmail, Google Agenda e memória opt-in.
-- **Decisões de arquitetura e trade-offs:** [`docs/adr/0001-arquitetura-v2.md`](docs/adr/0001-arquitetura-v2.md).
+- **Decisões de arquitetura e trade-offs:** [`docs/adr/0001-arquitetura-v2.md`](docs/adr/0001-arquitetura-v2.md) e [`docs/adr/0002-implantacao-oracle-runpod.md`](docs/adr/0002-implantacao-oracle-runpod.md).
 
 ```
 WhatsApp ─┐                                   ┌─ Spotify / ShazamIO / YouTube
@@ -12,14 +12,25 @@ UI local ─┘        │                           └─ Gmail / Google Agend
                    └─ SQLite: conversa, confirmações, lembretes, memória, tokens, auditoria
 ```
 
-## Requisitos
+## Modos de implantação
+
+| Modo | Onde roda o NICKEL | Onde roda o modelo | Guia |
+|---|---|---|---|
+| **Servidor** (em uso) | VM ARM grátis da Oracle, 24 h | RunPod Serverless (vLLM), pago por segundo | [`docs/deploy/oracle-runpod.md`](docs/deploy/oracle-runpod.md) |
+| **Local** | Linux com GPU NVIDIA de 24 GB | Ollama na mesma máquina | Seção abaixo |
+
+O modo é definido por `LLM_PROVIDER` no `.env`: `openai` para o RunPod ou outro provedor compatível, `ollama` para GPU local.
+
+No modo servidor, a voz por atalho não existe (a VM não tem microfone), mas áudios pelo WhatsApp funcionam normalmente.
+
+## Requisitos (modo local)
 
 - Linux com GPU NVIDIA de 24 GB (o `qwen3.6:27b` ocupa ~19 GB).
 - Python 3.11+, Node.js 20+, ffmpeg.
 - Spotify Premium: o Development Mode da API exige isso desde fev/2026.
 - Syncthing sincronizando o vault `Editora` entre o Windows e esta máquina.
 
-## Instalação
+## Instalação (modo local)
 
 ```bash
 git checkout v2
@@ -75,13 +86,13 @@ As notas vão para `06 Pensamentos/` no vault.
 
 Confirmações podem ser respondidas no WhatsApp, pela voz ou na UI. Política completa: [`docs/Nickel/policy_confirmation.md`](docs/Nickel/policy_confirmation.md).
 
-Comandos: `nickel serve` · `nickel listen` · `nickel chat` (texto no terminal) · `nickel doctor` · `nickel keys`.
+Comandos: `nickel serve` · `nickel listen` (só modo local) · `nickel chat` (texto no terminal) · `nickel doctor` · `nickel keys`.
 
 ## Estrutura
 
 ```
 nickel/
-  core/          agente, cliente Ollama, registro de skills, SQLite, persona
+  core/          agente, clientes LLM (Ollama e OpenAI/RunPod), registro de skills, SQLite, persona
   skills/        uma tool por função; cada módulo expõe register(registry)
   integrations/  Google, Spotify, música, Obsidian
   channels/      WhatsApp e voz
@@ -90,6 +101,8 @@ nickel/
 whatsapp-bridge/ open-wa v5 → HTTP local
 docs/Nickel/     persona e políticas (canônicas)
 docs/adr/        decisões de arquitetura
+docs/deploy/     guias de implantação
+scripts/         install.sh (local), install-server.sh (VM), install-services.sh
 ```
 
 **Nova skill:** crie `nickel/skills/<nome>.py` com `register(registry)`, inclua em `SKILL_MODULES` e atualize `docs/Nickel/tool_contracts.md`.
@@ -105,6 +118,7 @@ Os testes usam dublês para o LLM, o WhatsApp, o Spotify e o reconhecimento; nã
 
 ## Problemas comuns
 
+- **Primeira resposta demora (modo servidor).** É a partida a frio do worker no RunPod. O WhatsApp avisa depois de `WA_SLOW_NOTICE_SECONDS`. Para respostas mais rápidas, aumente o *Idle timeout* do endpoint (custa mais).
 - **Falta VRAM (CUDA OOM).** Reduza `LLM_NUM_CTX` ou mova o STT para a CPU com `STT_DEVICE=cpu` e `STT_COMPUTE_TYPE=int8`.
 - **Resposta lenta na voz.** Teste `LLM_MODEL=qwen3.5:9b`.
 - **WhatsApp desconectou.** Rode `systemctl --user restart nickel-whatsapp` e, se pedir, escaneie o QR de novo. O open-wa é um cliente não oficial: use com moderação.
