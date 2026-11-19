@@ -3,7 +3,8 @@
 Assistente pessoal com Qwen. Conversa pelo WhatsApp (texto, áudio e foto) e por voz no PC (push-to-talk), e tem uma UI local para histórico e confirmações.
 
 - **Skills:** Spotify, reconhecimento de música (Spotify ou YouTube), pensamentos no Obsidian, lembretes que avisam no celular, Gmail, Google Agenda e memória opt-in.
-- **Decisões de arquitetura e trade-offs:** [`docs/adr/0001-arquitetura-v2.md`](docs/adr/0001-arquitetura-v2.md) e [`docs/adr/0002-implantacao-oracle-runpod.md`](docs/adr/0002-implantacao-oracle-runpod.md).
+- **Workspaces:** perfis de trabalho (instruções, ferramentas, pasta de notas e histórico próprios) sobre o mesmo modelo, ao estilo dos Projetos do Claude. Troque com `/ws` e `/<nome>`. Veja [`workspaces/README.md`](workspaces/README.md).
+- **Decisões de arquitetura e trade-offs:** [`0001`](docs/adr/0001-arquitetura-v2.md) (arquitetura), [`0002`](docs/adr/0002-implantacao-oracle-runpod.md) (Oracle + RunPod) e [`0003`](docs/adr/0003-workspaces-e-modelo-local.md) (workspaces e modelo local).
 
 ```
 WhatsApp ─┐                                   ┌─ Spotify / ShazamIO / YouTube
@@ -17,9 +18,10 @@ UI local ─┘        │                           └─ Gmail / Google Agend
 | Modo | Onde roda o NICKEL | Onde roda o modelo | Guia |
 |---|---|---|---|
 | **Servidor** (em uso) | VM ARM grátis da Oracle, 24 h | RunPod Serverless (vLLM), pago por segundo | [`docs/deploy/oracle-runpod.md`](docs/deploy/oracle-runpod.md) |
-| **Local** | Linux com GPU NVIDIA de 24 GB | Ollama na mesma máquina | Seção abaixo |
+| **Local (Linux)** | Linux com GPU NVIDIA de 24 GB | Ollama na mesma máquina | Seção abaixo |
+| **Local (Windows)** | PC Windows (8 GB de VRAM, 24 GB de RAM) | `llama-server` com Qwen3.6-35B-A3B (MoE) | [`docs/deploy/local-windows-llamacpp.md`](docs/deploy/local-windows-llamacpp.md) |
 
-O modo é definido por `LLM_PROVIDER` no `.env`: `openai` para o RunPod ou outro provedor compatível, `ollama` para GPU local.
+O modo é definido por `LLM_PROVIDER` no `.env`: `openai` para o RunPod ou outro provedor compatível, `ollama` para GPU local, `llamacpp` para o `llama-server`. Workspaces com `backend: cloud` podem usar o RunPod mesmo com o modelo local como padrão.
 
 No modo servidor, a voz por atalho não existe (a VM não tem microfone), mas áudios pelo WhatsApp funcionam normalmente.
 

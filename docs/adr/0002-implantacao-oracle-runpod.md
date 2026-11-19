@@ -1,6 +1,6 @@
 # ADR-0002: Implantação em VM Oracle Always Free + RunPod Serverless
 
-**Status:** Aceito
+**Status:** Aceito (complementado pelo [ADR-0003](0003-workspaces-e-modelo-local.md), que adiciona a opção de inferência local)
 **Data:** 2026-10-16
 **Decisores:** Victor Daniel
 
