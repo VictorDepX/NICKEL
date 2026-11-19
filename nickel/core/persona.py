@@ -6,7 +6,11 @@ import os
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:  # pragma: no cover
+    from nickel.core.workspaces import Workspace
 
 _DEFAULT_DIR = Path(__file__).resolve().parents[2] / "docs" / "Nickel"
 _FALLBACK = "You are Nickel, an adult, pragmatic personal assistant. Be brief and precise."
@@ -63,10 +67,13 @@ def build_system_prompt(
     timezone: str,
     now: datetime | None = None,
     memory: list[dict[str, str]] | None = None,
+    workspace: "Workspace | None" = None,
 ) -> str:
     directory = str(prompts_dir())
     base = _load("system_prompt_text.md", directory) or _FALLBACK
     parts = [base]
+    if workspace is not None and workspace.instructions:
+        parts.append(f"Workspace ativo: {workspace.name}.\n{workspace.instructions}")
     if channel == "voice":
         voice = _load("system_prompt_voice.md", directory)
         if voice:

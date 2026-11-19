@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +14,7 @@ from nickel.core.llm import LLMError
 from nickel.core.persona import build_system_prompt
 from nickel.core.skills import ToolContext, ToolRegistry, ToolResult, validate_arguments
 from nickel.core.stores import PendingAction, StoredMessage
+from nickel.core.workspaces import Resolution, Workspace
 
 if TYPE_CHECKING:  # pragma: no cover
     from nickel.services import Services
@@ -71,34 +72,57 @@ class Agent:
     # ---------------------------------------------------------------- entrada
     async def handle(self, turn: Turn) -> AgentReply:
         async with self._lock:
+            route = self.services.workspaces.resolve(turn.text)
+            workspace = route.workspace
+            if route.command_only:
+                if route.switched:
+                    self._drop_pending(channel=turn.channel)
+                return AgentReply(text=self._command_text(route))
+            if route.command == "switch":
+                llm_text = route.text if turn.llm_text in (None, turn.text) else turn.llm_text
+                turn = replace(turn, text=route.text, llm_text=None if turn.llm_text is None else llm_text)
+            if route.switched:
+                self._drop_pending(channel=turn.channel)
+
             store = self.services.conversations
-            history = store.recent(self.services.settings.agent_history_messages)
-            store.add("user", turn.llm_text or turn.text, channel=turn.channel, attachments=turn.attachments)
+            conversation = workspace.conversation
+            limit = workspace.history or self.services.settings.agent_history_messages
+            history = store.recent(limit, conversation)
+            store.add(
+                "user",
+                turn.llm_text or turn.text,
+                channel=turn.channel,
+                attachments=turn.attachments,
+                conversation=conversation,
+            )
 
             pending = self.services.pending.current()
             if pending:
                 decision = classify_confirmation(turn.text)
                 if decision == "yes":
-                    reply = await self._execute_pending(pending, turn.channel)
-                    return self._finish(reply, turn.channel)
+                    reply = await self._execute_pending(pending, turn.channel, workspace)
+                    return self._finish(reply, turn.channel, workspace)
                 if decision == "no":
                     self.services.pending.resolve(pending.id, "cancelled")
                     self.services.audit.record("confirmation", pending.tool, "cancelled", {"id": pending.id})
-                    return self._finish(AgentReply(text="Cancelado."), turn.channel)
+                    return self._finish(AgentReply(text="Cancelado."), turn.channel, workspace)
                 # Mensagem nova não é consentimento: a ação pendente cai.
                 self.services.pending.resolve(pending.id, "dropped")
                 self.services.audit.record("confirmation", pending.tool, "dropped", {"id": pending.id})
 
-            reply = await self._run_llm(turn, history)
-            return self._finish(reply, turn.channel)
+            reply = await self._run_llm(turn, history, workspace)
+            if route.auto:
+                reply.text = f"↪ {workspace.name}\n{reply.text}"
+            return self._finish(reply, turn.channel, workspace)
 
     async def confirm(self, action_id: str, channel: str = "ui") -> AgentReply:
         async with self._lock:
             pending = self.services.pending.get(action_id)
             if not pending or pending.status != "pending":
                 return AgentReply(text="Essa ação não está mais pendente.")
-            reply = await self._execute_pending(pending, channel)
-            return self._finish(reply, channel)
+            workspace = self.services.workspaces.active()
+            reply = await self._execute_pending(pending, channel, workspace)
+            return self._finish(reply, channel, workspace)
 
     async def cancel(self, action_id: str, channel: str = "ui") -> AgentReply:
         async with self._lock:
@@ -107,20 +131,47 @@ class Agent:
                 return AgentReply(text="Essa ação não está mais pendente.")
             self.services.pending.resolve(action_id, "cancelled")
             self.services.audit.record("confirmation", pending.tool, "cancelled", {"id": action_id})
-            return self._finish(AgentReply(text=f"Cancelado: {pending.summary}."), channel)
+            return self._finish(
+                AgentReply(text=f"Cancelado: {pending.summary}."), channel, self.services.workspaces.active()
+            )
 
     # ---------------------------------------------------------------- internos
-    def _finish(self, reply: AgentReply, channel: str) -> AgentReply:
+    def _command_text(self, route: Resolution) -> str:
+        manager = self.services.workspaces
+        if route.command == "list":
+            return manager.describe()
+        if route.command == "unknown":
+            return f"Não existe o workspace '{route.target}'.\n{manager.describe()}"
+        description = f" {route.workspace.description}" if route.workspace.description else ""
+        return f"Workspace ativo: {route.workspace.name}.{description}"
+
+    def _drop_pending(self, *, channel: str) -> None:
+        pending = self.services.pending.current()
+        if pending:
+            self.services.pending.resolve(pending.id, "dropped")
+            self.services.audit.record("confirmation", pending.tool, "dropped", {"id": pending.id, "channel": channel})
+
+    def _finish(self, reply: AgentReply, channel: str, workspace: Workspace) -> AgentReply:
         attachments: list[dict[str, Any]] = []
         if reply.tools:
             attachments.append({"type": "tools", "items": reply.tools})
         if reply.pending_action_id:
             attachments.append({"type": "pending", "id": reply.pending_action_id})
-        self.services.conversations.add("assistant", reply.text, channel=channel, attachments=attachments)
+        self.services.conversations.add(
+            "assistant", reply.text, channel=channel, attachments=attachments, conversation=workspace.conversation
+        )
         return reply
 
-    def _context(self, channel: str, user_text: str, audio: Path | None = None) -> ToolContext:
-        return ToolContext(channel=channel, user_text=user_text, services=self.services, last_audio_path=audio)
+    def _context(
+        self, channel: str, user_text: str, audio: Path | None = None, workspace: Workspace | None = None
+    ) -> ToolContext:
+        return ToolContext(
+            channel=channel,
+            user_text=user_text,
+            services=self.services,
+            last_audio_path=audio,
+            workspace=workspace,
+        )
 
     async def _run_tool(self, name: str, ctx: ToolContext, arguments: dict[str, Any]) -> ToolResult:
         tool = self.registry.get(name)
@@ -136,8 +187,8 @@ class Agent:
         )
         return result
 
-    async def _execute_pending(self, pending: PendingAction, channel: str) -> AgentReply:
-        ctx = self._context(channel, "")
+    async def _execute_pending(self, pending: PendingAction, channel: str, workspace: Workspace) -> AgentReply:
+        ctx = self._context(channel, "", workspace=workspace)
         result = await self._run_tool(pending.tool, ctx, pending.arguments)
         self.services.pending.resolve(pending.id, "confirmed" if result.ok else "failed", result.data)
         self.services.audit.record("confirmation", pending.tool, "confirmed", {"id": pending.id})
@@ -162,12 +213,13 @@ class Agent:
             messages.append({"role": item.role, "content": content})
         return messages
 
-    async def _run_llm(self, turn: Turn, history: list[StoredMessage]) -> AgentReply:
+    async def _run_llm(self, turn: Turn, history: list[StoredMessage], workspace: Workspace) -> AgentReply:
         settings = self.services.settings
         system = build_system_prompt(
             channel=turn.channel,
             timezone=settings.timezone,
             memory=self.services.memory.all(),
+            workspace=workspace,
         )
         current: dict[str, Any] = {"role": "user", "content": turn.llm_text or turn.text}
         if turn.images:
@@ -177,13 +229,16 @@ class Agent:
             *self._history_messages(history),
             current,
         ]
-        tools = self.registry.schemas(self.services)
-        ctx = self._context(turn.channel, turn.text, turn.last_audio_path)
+        tools = self.registry.schemas(self.services, workspace)
+        ctx = self._context(turn.channel, turn.text, turn.last_audio_path, workspace)
         executed: list[dict[str, Any]] = []
+        llm = self.services.llm_for(workspace)
+        options = workspace.llm_options()
+        extra = {"options": options} if options else {}
 
         for _ in range(settings.agent_max_steps):
             try:
-                reply = await self.services.llm.chat(messages, tools)
+                reply = await llm.chat(messages, tools, **extra)
             except LLMError as exc:
                 self.services.audit.record("llm", settings.llm_model, "error", {"detail": str(exc)})
                 return AgentReply(text=f"O modelo local não respondeu ({exc}).", tools=executed, links=ctx.links)
@@ -205,7 +260,7 @@ class Agent:
             )
             for call in reply.tool_calls:
                 tool = self.registry.get(call.name)
-                if tool is None:
+                if tool is None or not workspace.allows(call.name):
                     result = ToolResult.fail(f"Tool desconhecida: {call.name}. Use só as tools listadas.")
                 else:
                     arguments, errors = validate_arguments(tool.parameters, call.arguments)

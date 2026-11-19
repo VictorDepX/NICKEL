@@ -63,7 +63,7 @@ def create_app(
             stop.set()
             for task in workers:
                 task.cancel()
-            for client in (services.llm, services.spotify, services.whatsapp):
+            for client in (services.llm, services.llm_cloud, services.spotify, services.whatsapp):
                 if client is not None and hasattr(client, "aclose"):
                     await client.aclose()
 
@@ -103,11 +103,44 @@ def create_app(
             "voice": voice.status(),
             "music": services.music is not None,
             "tools": [tool.name for tool in registry.available(services)],
+            "workspace": services.workspaces.active().id,
         }
 
     @app.get("/api/messages")
-    async def messages(limit: int = 60) -> list[dict[str, Any]]:
-        return [message.__dict__ for message in services.conversations.recent(min(limit, 300))]
+    async def messages(limit: int = 60, workspace: str | None = None) -> list[dict[str, Any]]:
+        selected = services.workspaces.get(workspace) if workspace else services.workspaces.active()
+        if selected is None:
+            raise HTTPException(404, "Workspace inexistente.")
+        return [message.__dict__ for message in services.conversations.recent(min(limit, 300), selected.conversation)]
+
+    @app.get("/api/workspaces")
+    async def workspaces() -> dict[str, Any]:
+        manager = services.workspaces
+        manager.refresh()
+        active = manager.active()
+        return {
+            "active": active.id,
+            "items": [
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "description": item.description,
+                    "aliases": list(item.aliases),
+                    "backend": item.backend,
+                    "tools": None if item.tools is None else list(item.tools),
+                    "notes_dir": item.notes_dir,
+                }
+                for item in manager.all()
+            ],
+        }
+
+    @app.post("/api/workspaces/{workspace_id}/activate")
+    async def activate_workspace(workspace_id: str) -> dict[str, Any]:
+        try:
+            selected = services.workspaces.activate(workspace_id)
+        except KeyError:
+            raise HTTPException(404, "Workspace inexistente.")
+        return {"active": selected.id, "name": selected.name}
 
     @app.post("/api/chat")
     async def chat(payload: dict[str, Any]) -> dict[str, Any]:

@@ -19,7 +19,7 @@ def _summary(match: MusicMatch) -> str:
 def _last_audio(ctx: ToolContext) -> Path | None:
     if ctx.last_audio_path and ctx.last_audio_path.exists():
         return ctx.last_audio_path
-    for message in reversed(ctx.services.conversations.recent(20)):
+    for message in reversed(ctx.services.conversations.recent(20, ctx.conversation)):
         for attachment in message.attachments:
             if attachment.get("type") == "audio" and Path(attachment.get("path", "")).exists():
                 return Path(attachment["path"])

@@ -8,15 +8,17 @@ from typing import Any
 
 from nickel.config import Settings
 from nickel.core.db import Database
-from nickel.core.llm import LLMClient, make_llm
+from nickel.core.llm import LLMClient, make_cloud_llm, make_llm
 from nickel.core.stores import (
     AuditLog,
     ConversationStore,
     InboundDedup,
     MemoryStore,
     PendingActionStore,
+    StateStore,
     TokenStore,
 )
+from nickel.core.workspaces import Workspace, WorkspaceManager
 
 
 def module_available(name: str) -> bool:
@@ -34,6 +36,9 @@ class Services:
     tokens: TokenStore
     dedup: InboundDedup
     llm: LLMClient
+    state: StateStore | None = None
+    workspaces: WorkspaceManager | None = None
+    llm_cloud: LLMClient | None = None
     google: Any = None
     gmail: Any = None
     calendar: Any = None
@@ -51,6 +56,7 @@ class Services:
     def core(cls, settings: Settings, llm: LLMClient, db: Database | None = None) -> "Services":
         """Só o essencial (banco + LLM). Integrações ficam None até serem atribuídas."""
         db = db or Database(settings.db_path)
+        state = StateStore(db)
         return cls(
             settings=settings,
             db=db,
@@ -61,7 +67,18 @@ class Services:
             tokens=TokenStore(db, settings.oauth_token_key),
             dedup=InboundDedup(db),
             llm=llm,
+            state=state,
+            workspaces=WorkspaceManager.from_settings(settings, state),
         )
+
+    def llm_for(self, workspace: Workspace | None) -> LLMClient:
+        """Backend do workspace. Sem `llm_cloud` configurado, `backend: cloud` cai no modelo local."""
+        if workspace is not None and workspace.backend == "cloud" and self.llm_cloud is not None:
+            return self.llm_cloud
+        return self.llm
+
+    def active_conversation(self) -> str:
+        return self.workspaces.active().conversation if self.workspaces else "main"
 
     def google_ready(self) -> bool:
         return self.google is not None and self.google.status().get("status") == "ready"
@@ -83,6 +100,7 @@ def build_services(settings: Settings, llm: LLMClient | None = None) -> Services
     from nickel.skills.reminders import ReminderService
 
     services = Services.core(settings, llm or make_llm(settings))
+    services.llm_cloud = make_cloud_llm(settings)
 
     services.google = GoogleAuth(settings, services.tokens)
     services.gmail = GmailService(services.google)

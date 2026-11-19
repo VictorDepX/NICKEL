@@ -95,6 +95,14 @@ async def _doctor() -> int:
     if provider == "ollama":
         line(health.get("ok", False), f"Ollama em {settings.llm_base_url}", "rode `ollama serve`")
         line(bool(health.get("model_present")), f"Modelo {settings.llm_model}", f"rode `ollama pull {settings.llm_model}`")
+    elif health and health.get("provider") == "llamacpp":
+        line(
+            health.get("ok", False),
+            f"llama-server em {settings.llm_base_url}",
+            health.get("detail") or "rode scripts/windows/start-llama.ps1",
+        )
+        if health.get("ok") and health.get("detail"):
+            print(f"     {health['detail']}")
     elif health:
         label = "Endpoint RunPod" if health.get("provider") == "runpod" else f"Provedor em {settings.llm_base_url}"
         line(health.get("ok", False), f"{label} ({settings.llm_model})", health.get("detail") or "confira LLM_BASE_URL e LLM_API_KEY")
@@ -102,6 +110,18 @@ async def _doctor() -> int:
             print(f"     {health['detail']}")
         if health.get("provider") == "openai":
             line(bool(health.get("model_present")), f"Modelo {settings.llm_model} no provedor", "confira LLM_MODEL")
+
+    from nickel.core.workspaces import load_workspaces
+
+    spaces = load_workspaces(settings.workspaces_dir, settings.workspace_default)
+    names = ", ".join(w.name for w in spaces.values())
+    line(len(spaces) > 1, f"Workspaces ({names})", f"crie arquivos .md em {settings.workspaces_dir} (veja workspaces/)")
+    if any(w.backend == "cloud" for w in spaces.values()):
+        line(
+            bool(settings.llm_cloud_base_url),
+            "Backend cloud (LLM_CLOUD_BASE_URL)",
+            "há workspace com `backend: cloud`; sem isso ele usa o modelo local",
+        )
 
     line(bool(settings.oauth_token_key), "OAUTH_TOKEN_KEY", "gere com `nickel keys`")
     line(bool(settings.bridge_token), "BRIDGE_TOKEN", "gere com `nickel keys`")

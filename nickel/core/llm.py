@@ -8,7 +8,10 @@ O agente produz mensagens num formato neutro:
 Cada cliente converte para o formato do seu servidor.
 
 - OllamaClient: `/api/chat` nativo do Ollama (GPU local).
-- OpenAICompatClient: `/chat/completions` (vLLM no RunPod Serverless, ou outro provedor compatível).
+- OpenAICompatClient: `/chat/completions` (vLLM no RunPod Serverless, `llama-server` do llama.cpp
+  ou outro provedor compatível).
+
+`chat(..., options=...)` aceita sobrescritas por chamada (workspaces): think, temperature, max_tokens.
 """
 
 from __future__ import annotations
@@ -49,7 +52,12 @@ class LLMReply:
 
 
 class LLMClient(Protocol):
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> LLMReply: ...
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> LLMReply: ...
 
 
 def _parse_arguments(raw: Any) -> dict[str, Any]:
@@ -144,25 +152,36 @@ class OllamaClient:
                 converted.append(item)
         return converted
 
-    def build_payload(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
+    def build_payload(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        options = options or {}
         payload: dict[str, Any] = {
             "model": self.settings.llm_model,
             "messages": self.convert_messages(messages),
             "stream": False,
-            "think": self.settings.llm_think,
+            "think": options.get("think", self.settings.llm_think),
             "keep_alive": self.settings.llm_keep_alive,
             "options": {
                 "num_ctx": self.settings.llm_num_ctx,
-                "num_predict": self.settings.llm_max_tokens,
-                "temperature": self.settings.llm_temperature,
+                "num_predict": options.get("max_tokens", self.settings.llm_max_tokens),
+                "temperature": options.get("temperature", self.settings.llm_temperature),
             },
         }
         if tools:
             payload["tools"] = tools
         return payload
 
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> LLMReply:
-        payload = self.build_payload(messages, tools)
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> LLMReply:
+        payload = self.build_payload(messages, tools, options)
         try:
             response = await self._client.post("/api/chat", json=payload)
             response.raise_for_status()
@@ -194,11 +213,14 @@ class OllamaClient:
 
 
 # --------------------------------------------------------------------------- OpenAI-compatível
+_KEYLESS_PROVIDERS = {"llamacpp", "llama.cpp", "llama-server"}
+
+
 class OpenAICompatClient:
-    """Fala `/chat/completions`. Pensado para o worker vLLM do RunPod Serverless.
+    """Fala `/chat/completions`: worker vLLM do RunPod Serverless, `llama-server` local ou outro compatível.
 
     Partidas a frio podem levar minutos: o timeout é longo e erros transitórios
-    (timeout, 429, 5xx) são repetidos `llm_retries` vezes.
+    (timeout, 429, 5xx) são repetidos `llm_retries` vezes. O `llama-server` local não exige chave.
     """
 
     def __init__(
@@ -207,12 +229,13 @@ class OpenAICompatClient:
         transport: httpx.AsyncBaseTransport | None = None,
         backoff_seconds: tuple[float, ...] = (3.0, 10.0, 20.0),
     ) -> None:
-        if not settings.llm_api_key:
+        self.local = settings.llm_provider.lower() in _KEYLESS_PROVIDERS
+        if not settings.llm_api_key and not self.local:
             raise LLMError("LLM_API_KEY ausente (chave do RunPod ou do provedor).")
         self.settings = settings
         self.base_url = settings.llm_base_url.rstrip("/")
         self.backoff = backoff_seconds
-        headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
+        headers = {"Authorization": f"Bearer {settings.llm_api_key}"} if settings.llm_api_key else {}
         self._client = httpx.AsyncClient(timeout=settings.llm_timeout_seconds, transport=transport, headers=headers)
 
     @property
@@ -258,23 +281,34 @@ class OpenAICompatClient:
                 converted.append({"role": role, "content": message.get("content") or ""})
         return converted
 
-    def build_payload(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
+    def build_payload(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        options = options or {}
         payload: dict[str, Any] = {
             "model": self.settings.llm_model,
             "messages": self.convert_messages(messages),
-            "temperature": self.settings.llm_temperature,
-            "max_tokens": self.settings.llm_max_tokens,
+            "temperature": options.get("temperature", self.settings.llm_temperature),
+            "max_tokens": options.get("max_tokens", self.settings.llm_max_tokens),
             "stream": False,
-            # Qwen3.x pensa por padrão; vLLM aceita este campo extra no corpo.
-            "chat_template_kwargs": {"enable_thinking": self.settings.llm_think},
+            # Qwen3.x pensa por padrão; vLLM e llama-server aceitam este campo extra no corpo.
+            "chat_template_kwargs": {"enable_thinking": options.get("think", self.settings.llm_think)},
         }
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         return payload
 
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> LLMReply:
-        payload = self.build_payload(messages, tools)
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> LLMReply:
+        payload = self.build_payload(messages, tools, options)
         attempts = max(0, self.settings.llm_retries) + 1
         last_error = "erro desconhecido"
         for attempt in range(attempts):
@@ -301,6 +335,8 @@ class OpenAICompatClient:
         """Não gera job: no RunPod usa /health do endpoint; noutros provedores, /models."""
         endpoint = self.runpod_endpoint_id
         try:
+            if self.local:
+                return await self._llamacpp_health()
             if endpoint:
                 response = await self._client.get(f"https://api.runpod.ai/v2/{endpoint}/health", timeout=8)
                 response.raise_for_status()
@@ -332,6 +368,27 @@ class OpenAICompatClient:
         except (httpx.HTTPError, ValueError) as exc:
             return {"ok": False, "provider": "runpod" if endpoint else "openai", "detail": str(exc)}
 
+    async def _llamacpp_health(self) -> dict[str, Any]:
+        root = self.base_url[: -len("/v1")] if self.base_url.endswith("/v1") else self.base_url
+        try:
+            response = await self._client.get(f"{root}/health", timeout=5)
+            if response.status_code == 503:
+                return {"ok": False, "provider": "llamacpp", "detail": "llama-server ainda carregando o modelo"}
+            response.raise_for_status()
+            models_response = await self._client.get(f"{self.base_url}/models", timeout=5)
+            models_response.raise_for_status()
+            served = [item.get("id") for item in models_response.json().get("data", []) if item.get("id")]
+        except (httpx.HTTPError, ValueError) as exc:
+            return {"ok": False, "provider": "llamacpp", "detail": f"llama-server inacessível: {exc}"}
+        return {
+            "ok": True,
+            "provider": "llamacpp",
+            "model": self.settings.llm_model,
+            # O llama-server serve um único modelo e ignora o campo "model" da requisição.
+            "model_present": True,
+            "detail": f"servindo: {', '.join(served) or 'modelo sem nome'}",
+        }
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -340,6 +397,21 @@ def make_llm(settings: Settings) -> LLMClient:
     provider = settings.llm_provider.lower()
     if provider == "ollama":
         return OllamaClient(settings)
-    if provider in {"openai", "runpod", "vllm"}:
+    if provider in {"openai", "runpod", "vllm", *_KEYLESS_PROVIDERS}:
         return OpenAICompatClient(settings)
-    raise LLMError(f"LLM_PROVIDER desconhecido: {settings.llm_provider} (use ollama ou openai).")
+    raise LLMError(f"LLM_PROVIDER desconhecido: {settings.llm_provider} (use ollama, llamacpp ou openai).")
+
+
+def make_cloud_llm(settings: Settings) -> LLMClient | None:
+    """Backend `cloud` opcional (RunPod) para workspaces que pedem mais raciocínio. None se não configurado."""
+    if not settings.llm_cloud_base_url:
+        return None
+    return OpenAICompatClient(
+        settings.with_overrides(
+            llm_provider="openai",
+            llm_base_url=settings.llm_cloud_base_url,
+            llm_api_key=settings.llm_cloud_api_key,
+            llm_model=settings.llm_cloud_model or settings.llm_model,
+            llm_timeout_seconds=settings.llm_cloud_timeout_seconds,
+        )
+    )

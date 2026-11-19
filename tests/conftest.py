@@ -30,8 +30,8 @@ class FakeLLM:
     def queue(self, *replies: LLMReply) -> None:
         self.replies.extend(replies)
 
-    async def chat(self, messages, tools=None) -> LLMReply:
-        self.calls.append({"messages": [dict(m) for m in messages], "tools": tools})
+    async def chat(self, messages, tools=None, options=None) -> LLMReply:
+        self.calls.append({"messages": [dict(m) for m in messages], "tools": tools, "options": options})
         if not self.replies:
             return LLMReply(content="(sem roteiro)")
         return self.replies.pop(0)
@@ -80,6 +80,7 @@ def vault(tmp_path: Path) -> Path:
 def settings(tmp_path: Path, vault: Path) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
+        workspaces_dir=tmp_path / "workspaces",
         timezone="America/Sao_Paulo",
         oauth_token_key=Fernet.generate_key().decode(),
         bridge_token="segredo",

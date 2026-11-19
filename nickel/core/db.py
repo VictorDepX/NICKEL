@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS memory (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tokens (
     name TEXT PRIMARY KEY,
     payload BLOB NOT NULL,

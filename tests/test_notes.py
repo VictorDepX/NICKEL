@@ -76,3 +76,9 @@ def test_capture_tool_end_to_end(services, llm, vault):
     text = note.read_text(encoding="utf-8")
     assert "fonte: voz" in text
     assert "> anota aí um inquilino que só existe de noite" in text
+
+
+def test_titles_are_scanned_even_right_after_boot(vault, monkeypatch):
+    """time.monotonic() pode valer poucos segundos logo após o boot; o cache não pode tratar isso como 'recente'."""
+    monkeypatch.setattr("nickel.integrations.obsidian.time.monotonic", lambda: 5.0)
+    assert "Fluxo de criação" in ObsidianVault(vault, "06 Pensamentos").existing_titles()

@@ -41,7 +41,7 @@ class ObsidianVault:
         self.vault_path = vault_path
         self.notes_dir = notes_dir
         self._titles: set[str] = set()
-        self._titles_at = 0.0
+        self._titles_at: float | None = None  # None = ainda não varreu (monotonic() pode ser < 60 s logo após o boot)
 
     @property
     def available(self) -> bool:
@@ -52,6 +52,17 @@ class ObsidianVault:
         assert self.vault_path is not None
         return self.vault_path / self.notes_dir
 
+    def folder(self, notes_dir: str | None = None) -> Path:
+        """Pasta de notas (a padrão ou a de um workspace). Nunca sai do vault."""
+        assert self.vault_path is not None
+        if not notes_dir:
+            return self.notes_path
+        base = self.vault_path.resolve()
+        target = (base / notes_dir).resolve()
+        if target != base and base not in target.parents:
+            raise ValueError(f"Pasta fora do vault: {notes_dir}")
+        return target
+
     def _iter_notes(self, root: Path):
         for path in root.rglob("*.md"):
             if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
@@ -61,7 +72,7 @@ class ObsidianVault:
     def existing_titles(self) -> set[str]:
         if not self.available:
             return set()
-        if time.monotonic() - self._titles_at > 60:
+        if self._titles_at is None or time.monotonic() - self._titles_at > 60:
             self._titles = {path.stem for path in self._iter_notes(self.vault_path)}
             self._titles_at = time.monotonic()
         return self._titles
@@ -77,11 +88,13 @@ class ObsidianVault:
         source: str,
         original: str,
         now: datetime,
+        notes_dir: str | None = None,
     ) -> tuple[Path, list[str]]:
-        """Cria a nota e devolve (caminho, links aceitos)."""
+        """Cria a nota e devolve (caminho, links aceitos). `notes_dir` troca a pasta (workspace)."""
         if not self.available:
             raise FileNotFoundError("Vault do Obsidian não encontrado (OBSIDIAN_VAULT_PATH).")
-        self.notes_path.mkdir(parents=True, exist_ok=True)
+        folder = self.folder(notes_dir)
+        folder.mkdir(parents=True, exist_ok=True)
 
         known = self.existing_titles()
         valid_links = [link for link in dict.fromkeys(l.strip() for l in links) if link and link in known]
@@ -113,20 +126,22 @@ class ObsidianVault:
         body += ["---", f"Capturado pelo NICKEL ({source}) em {now.strftime('%d/%m/%Y %H:%M')}.", ""]
 
         base = safe_filename(title)
-        path = self.notes_path / f"{base}.md"
+        path = folder / f"{base}.md"
         counter = 2
         while path.exists():
-            path = self.notes_path / f"{base} ({counter}).md"
+            path = folder / f"{base} ({counter}).md"
             counter += 1
         with path.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write("\n".join(body))
         self._titles.add(path.stem)
         return path, valid_links
 
-    def search(self, query: str, limit: int = 5, whole_vault: bool = False) -> list[dict[str, Any]]:
+    def search(
+        self, query: str, limit: int = 5, whole_vault: bool = False, notes_dir: str | None = None
+    ) -> list[dict[str, Any]]:
         if not self.available:
             return []
-        root = self.vault_path if whole_vault else self.notes_path
+        root = self.vault_path if whole_vault else self.folder(notes_dir)
         if not root.exists():
             return []
         needle = query.lower().strip()

@@ -206,6 +206,24 @@ class MemoryStore:
         return self.db.query("SELECT key, value, created_at FROM memory ORDER BY key")
 
 
+class StateStore:
+    """Pares chave/valor de estado do NICKEL (ex.: workspace ativo)."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def get(self, key: str, default: str | None = None) -> str | None:
+        row = self.db.query_one("SELECT value FROM state WHERE key = ?", (key,))
+        return row["value"] if row else default
+
+    def set(self, key: str, value: str) -> None:
+        self.db.execute(
+            "INSERT INTO state (key, value, updated_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (key, value, iso(utcnow())),
+        )
+
+
 class TokenStore:
     """Tokens OAuth criptografados com Fernet (OAUTH_TOKEN_KEY)."""
 

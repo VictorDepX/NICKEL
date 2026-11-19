@@ -34,6 +34,8 @@ class Outbound:
         if self.services.settings.voice_notify:
             delivered = await desktop_notify("NICKEL", text) or delivered
         if delivered:
-            self.services.conversations.add("assistant", text, channel=channel)
+            self.services.conversations.add(
+                "assistant", text, channel=channel, conversation=self.services.active_conversation()
+            )
         self.services.audit.record("outbound", channel, "ok" if delivered else "undelivered", {"text": text})
         return delivered

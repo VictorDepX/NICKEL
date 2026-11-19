@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 if TYPE_CHECKING:  # pragma: no cover
+    from nickel.core.workspaces import Workspace
     from nickel.services import Services
 
 _MAX_RESULT_CHARS = 4000
@@ -38,6 +39,14 @@ class ToolContext:
     last_audio_path: Path | None = None
     # Links que o canal pode abrir/mostrar depois da resposta (ex.: música encontrada).
     links: list[str] = field(default_factory=list)
+    # Workspace em uso no turno (pasta de notas, histórico). None em contextos sem workspace.
+    workspace: "Workspace | None" = None
+
+    @property
+    def conversation(self) -> str:
+        from nickel.core.stores import MAIN_CONVERSATION
+
+        return self.workspace.conversation if self.workspace else MAIN_CONVERSATION
 
     @property
     def settings(self):
@@ -124,8 +133,11 @@ class ToolRegistry:
     def available(self, services: "Services") -> list[Tool]:
         return [tool for tool in self._tools.values() if tool.is_available(services)]
 
-    def schemas(self, services: "Services") -> list[dict[str, Any]]:
-        return [tool.schema() for tool in self.available(services)]
+    def schemas(self, services: "Services", workspace: "Workspace | None" = None) -> list[dict[str, Any]]:
+        tools = self.available(services)
+        if workspace is not None:
+            tools = [tool for tool in tools if workspace.allows(tool.name)]
+        return [tool.schema() for tool in tools]
 
 
 _TYPES: dict[str, tuple[type, ...]] = {

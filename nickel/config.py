@@ -42,7 +42,7 @@ class Settings:
     data_dir: Path = Path("data")
     timezone: str = "America/Sao_Paulo"
 
-    # LLM: "ollama" (GPU local) ou "openai" (RunPod Serverless / vLLM / outro compatível)
+    # LLM: "ollama" (GPU local), "llamacpp" (llama-server local), "openai" (RunPod Serverless / vLLM / outro compatível)
     llm_provider: str = "ollama"
     llm_base_url: str = "http://127.0.0.1:11434"
     llm_api_key: str | None = None
@@ -56,6 +56,18 @@ class Settings:
     llm_keep_alive: str = "30m"
     agent_max_steps: int = 6
     agent_history_messages: int = 16
+
+    # Backend "cloud" opcional (RunPod), usado por workspaces com `backend: cloud`
+    llm_cloud_base_url: str | None = None
+    llm_cloud_api_key: str | None = None
+    llm_cloud_model: str | None = None
+    llm_cloud_timeout_seconds: float = 300.0
+
+    # Workspaces (perfis de trabalho sobre o mesmo modelo)
+    workspaces_dir: Path = Path("workspaces")
+    workspace_default: str = "geral"
+    workspace_auto_route: bool = False
+    workspace_auto_threshold: int = 2
 
     # Segredos
     oauth_token_key: str | None = None
@@ -140,6 +152,14 @@ class Settings:
             llm_keep_alive=_str(env, "LLM_KEEP_ALIVE", cls.llm_keep_alive),
             agent_max_steps=_int(env, "AGENT_MAX_STEPS", cls.agent_max_steps),
             agent_history_messages=_int(env, "AGENT_HISTORY_MESSAGES", cls.agent_history_messages),
+            llm_cloud_base_url=_str(env, "LLM_CLOUD_BASE_URL"),
+            llm_cloud_api_key=_str(env, "LLM_CLOUD_API_KEY"),
+            llm_cloud_model=_str(env, "LLM_CLOUD_MODEL"),
+            llm_cloud_timeout_seconds=_float(env, "LLM_CLOUD_TIMEOUT_SECONDS", cls.llm_cloud_timeout_seconds),
+            workspaces_dir=Path(_str(env, "WORKSPACES_DIR", "workspaces")).expanduser(),
+            workspace_default=_str(env, "WORKSPACE_DEFAULT", cls.workspace_default),
+            workspace_auto_route=_bool(env, "WORKSPACE_AUTO_ROUTE", cls.workspace_auto_route),
+            workspace_auto_threshold=_int(env, "WORKSPACE_AUTO_THRESHOLD", cls.workspace_auto_threshold),
             oauth_token_key=_str(env, "OAUTH_TOKEN_KEY"),
             bridge_token=_str(env, "BRIDGE_TOKEN"),
             google_client_id=_str(env, "GOOGLE_CLIENT_ID"),

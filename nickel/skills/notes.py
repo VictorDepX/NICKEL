@@ -50,6 +50,7 @@ def register(registry: ToolRegistry) -> None:
             source=_SOURCES.get(ctx.channel, ctx.channel),
             original=ctx.user_text,
             now=now,
+            notes_dir=ctx.workspace.notes_dir if ctx.workspace else None,
         )
         relative = path.relative_to(vault.vault_path)
         return ToolResult(True, f"Nota criada: {relative}.", {"path": str(relative), "links": links})
@@ -70,7 +71,10 @@ def register(registry: ToolRegistry) -> None:
     )
     async def notes_search(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         results = ctx.services.obsidian.search(
-            args["query"], limit=min(int(args.get("limit") or 5), 10), whole_vault=bool(args.get("whole_vault"))
+            args["query"],
+            limit=min(int(args.get("limit") or 5), 10),
+            whole_vault=bool(args.get("whole_vault")),
+            notes_dir=ctx.workspace.notes_dir if ctx.workspace else None,
         )
         if not results:
             return ToolResult(True, f"Nenhuma nota com '{args['query']}'.", {"results": []})
