@@ -11,8 +11,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "Consultando a última release do llama.cpp..."
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" -Headers @{ "User-Agent" = "nickel" }
-$asset = $release.assets | Where-Object { $_.name -match "bin-win-vulkan-x64\.zip$" } | Select-Object -First 1
+# As builds do llama.cpp saem como pre-release, entao /releases/latest nao serve: varre as recentes.
+$releases = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15" -Headers @{ "User-Agent" = "nickel" }
+$release = $null; $asset = $null
+foreach ($r in $releases) {
+    $asset = $r.assets | Where-Object { $_.name -match "bin-win-vulkan-x64\.zip$" } | Select-Object -First 1
+    if ($asset) { $release = $r; break }
+}
+if (-not $release) { $release = $releases | Select-Object -First 1 }
 if (-not $asset) {
     Write-Host "Não achei o build Vulkan x64. Assets do Windows nesta release ($($release.tag_name)):" -ForegroundColor Yellow
     $release.assets | Where-Object { $_.name -match "win" } | ForEach-Object { Write-Host "  $($_.name)" }
