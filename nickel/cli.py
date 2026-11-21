@@ -1,4 +1,4 @@
-"""CLI: `nickel serve | listen | chat | keys | doctor`."""
+"""CLI: `nickel serve | listen | chat | keys | doctor | audit`."""
 
 from __future__ import annotations
 
@@ -164,6 +164,50 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     return asyncio.run(_doctor())
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    import json
+    from pathlib import Path
+
+    if args.audit_command == "docs":
+        from nickel.core.docs_gen import write_docs
+
+        for path in write_docs(Path(args.out)):
+            print(f"Gerado: {path}")
+        return 0
+
+    from nickel.core.db import Database
+    from nickel.core.report import render_run_report
+    from nickel.core.stores import AuditLog
+
+    settings = load_settings()
+    audit = AuditLog(Database(settings.db_path))
+    if args.audit_command == "report":
+        events = audit.run(args.run_id)
+        if not events:
+            print(f"Execução não encontrada: {args.run_id}", file=sys.stderr)
+            return 1
+        print(render_run_report(events), end="")
+        return 0
+
+    # export
+    rows = audit.db.query(
+        "SELECT run_id, MAX(id) AS last_id FROM audit WHERE run_id IS NOT NULL AND at >= ? GROUP BY run_id ORDER BY last_id DESC",
+        (args.since or "",),
+    )
+    if args.format == "md":
+        parts = []
+        for row in rows:
+            events = [e for e in audit.run(row["run_id"]) if e["at"] >= (args.since or "")]
+            parts.append(render_run_report(events))
+        print("\n".join(parts), end="")
+        return 0
+    events = audit.db.query("SELECT * FROM audit WHERE at >= ? ORDER BY id ASC", (args.since or "",))
+    for event in events:
+        event["detail"] = json.loads(event["detail"] or "{}")
+        print(json.dumps(event, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nickel", description="Assistente pessoal local.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -175,6 +219,16 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("chat", help="Conversa por texto no terminal").set_defaults(func=cmd_chat)
     sub.add_parser("keys", help="Gera OAUTH_TOKEN_KEY e BRIDGE_TOKEN").set_defaults(func=cmd_keys)
     sub.add_parser("doctor", help="Verifica dependências e configuração").set_defaults(func=cmd_doctor)
+    audit = sub.add_parser("audit", help="Documentação e relatórios de auditoria")
+    audit.set_defaults(func=cmd_audit)
+    audit_sub = audit.add_subparsers(dest="audit_command", required=True)
+    docs = audit_sub.add_parser("docs", help="Regrava docs/processos a partir do catálogo de eventos")
+    docs.add_argument("--out", default="docs/processos")
+    report = audit_sub.add_parser("report", help="Imprime o relatório de uma execução")
+    report.add_argument("run_id")
+    export = audit_sub.add_parser("export", help="Exporta eventos de auditoria")
+    export.add_argument("--since", help="Data/hora ISO; só eventos com at >= valor")
+    export.add_argument("--format", choices=["jsonl", "md"], default="jsonl")
     args = parser.parse_args(argv)
     return args.func(args)
 

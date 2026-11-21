@@ -4,7 +4,7 @@ Assistente pessoal com Qwen. Conversa pelo WhatsApp (texto, áudio e foto) e por
 
 - **Skills:** Spotify, reconhecimento de música (Spotify ou YouTube), pensamentos no Obsidian, lembretes que avisam no celular, Gmail, Google Agenda e memória opt-in.
 - **Workspaces:** perfis de trabalho (instruções, ferramentas, pasta de notas e histórico próprios) sobre o mesmo modelo, ao estilo dos Projetos do Claude. Troque com `/ws` e `/<nome>`. Veja [`workspaces/README.md`](workspaces/README.md).
-- **Decisões de arquitetura e trade-offs:** [`0001`](docs/adr/0001-arquitetura-v2.md) (arquitetura), [`0002`](docs/adr/0002-implantacao-oracle-runpod.md) (Oracle + RunPod) e [`0003`](docs/adr/0003-workspaces-e-modelo-local.md) (workspaces e modelo local).
+- **Decisões de arquitetura e trade-offs:** [`0001`](docs/adr/0001-arquitetura-v2.md) (arquitetura), [`0002`](docs/adr/0002-implantacao-oracle-runpod.md) (Oracle + RunPod) e [`0003`](docs/adr/0003-workspaces-e-modelo-local.md) (workspaces e modelo local) e [`0004`](docs/adr/0004-monitor-e-auditoria.md) (monitor e auditoria).
 
 ```
 WhatsApp ─┐                                   ┌─ Spotify / ShazamIO / YouTube
@@ -88,7 +88,19 @@ As notas vão para `06 Pensamentos/` no vault.
 
 Confirmações podem ser respondidas no WhatsApp, pela voz ou na UI. Política completa: [`docs/Nickel/policy_confirmation.md`](docs/Nickel/policy_confirmation.md).
 
-Comandos: `nickel serve` · `nickel listen` (só modo local) · `nickel chat` (texto no terminal) · `nickel doctor` · `nickel keys`.
+Comandos: `nickel serve` · `nickel listen` (só modo local) · `nickel chat` (texto no terminal) · `nickel doctor` · `nickel keys` · `nickel audit`.
+
+## Monitor e auditoria
+
+A aba **Monitor** da UI mostra, ao vivo, a fase do agente (roteando, pensando, executando ferramenta etc.), o raciocínio do modelo, as ferramentas usadas e a linha do tempo de cada execução. Para ver o raciocínio, ligue **Mostrar raciocínio** na aba. O monitor não tem autenticação e escuta só em `127.0.0.1`.
+
+Pela linha de comando:
+
+- `nickel audit report <run_id>`: relatório em Markdown de uma execução.
+- `nickel audit export [--since ISO] [--format jsonl|md]`: exporta os eventos.
+- `nickel audit docs [--out docs/processos]`: regrava a documentação gerada do código.
+
+Decisões: [`ADR-0004`](docs/adr/0004-monitor-e-auditoria.md). Processos gerados: [`docs/processos/`](docs/processos/catalogo-de-eventos.md) (catálogo de eventos e fluxo de um turno).
 
 ## Estrutura
 
@@ -104,6 +116,7 @@ whatsapp-bridge/ open-wa v5 → HTTP local
 docs/Nickel/     persona e políticas (canônicas)
 docs/adr/        decisões de arquitetura
 docs/deploy/     guias de implantação
+docs/processos/  catálogo de eventos e fluxo de um turno (gerados)
 scripts/         install.sh (local), install-server.sh (VM), install-services.sh
 ```
 
