@@ -187,6 +187,9 @@ class Agent:
             )
             try:
                 reply = await body(stats)
+            except asyncio.CancelledError:  # turno cancelado: fecha a fase na UI e propaga
+                audit.record("turn", channel, "error", {"detail": "cancelado"}, duration_ms=_elapsed_ms(started))
+                raise
             except Exception as exc:
                 audit.record("turn", channel, "error", {"detail": str(exc)}, duration_ms=_elapsed_ms(started))
                 raise
@@ -319,8 +322,9 @@ class Agent:
         ctx = self._context(turn.channel, turn.text, turn.last_audio_path, workspace)
         executed: list[dict[str, Any]] = []
         llm = self.services.llm_for(workspace)
-        cloud = workspace.backend == "cloud" and self.services.llm_cloud is not None
+        cloud = self.services.llm_cloud is not None and llm is self.services.llm_cloud
         model = (settings.llm_cloud_model or settings.llm_model) if cloud else settings.llm_model
+        backend = "cloud" if cloud else "local"
         stream = bool(getattr(llm, "supports_stream", False) and settings.llm_stream)
         options = workspace.llm_options()
         if turn.think is not None:
@@ -330,7 +334,10 @@ class Agent:
         for step in range(settings.agent_max_steps):
             stats.steps = step + 1
             self.services.audit.record(
-                "llm", model, "start", {"step": step, "model": model, "backend": workspace.backend}
+                "llm",
+                model,
+                "start",
+                {"step": step, "model": model, "backend": backend, "requested_backend": workspace.backend},
             )
             tracker = ReasoningTracker(self.services.audit, step=step, tool_names=tool_names) if stream else None
             call_extra = {**extra, "on_delta": tracker.feed} if tracker is not None else extra
@@ -347,6 +354,11 @@ class Agent:
                 )
                 stats.error = str(exc)
                 return AgentReply(text=f"O modelo local não respondeu ({exc}).", tools=executed, links=ctx.links)
+            except Exception as exc:  # erro inesperado: fecha o llm/start antes de propagar
+                self.services.audit.record(
+                    "llm", model, "error", {"step": step, "detail": str(exc)}, duration_ms=_elapsed_ms(started)
+                )
+                raise
             elapsed = _elapsed_ms(started)
             done: dict[str, Any] = {"step": step, "duration_ms": elapsed}
             done.update({key: reply.usage[key] for key in _USAGE_KEYS if key in reply.usage})

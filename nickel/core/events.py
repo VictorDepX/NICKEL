@@ -29,7 +29,7 @@ CATALOG: dict[str, EventSpec] = dict(
         _spec("outbound", "Envio de mensagens proativas por um canal.", ("ok", "undelivered"), ("text",), "nickel/core/outbound.py"),
         _spec("confirmation", "Ciclo de confirmação de ações sensíveis.", ("requested", "confirmed", "cancelled", "dropped"), ("id", "channel"), "nickel/core/agent.py"),
         _spec("tool", "Execução de ferramentas pelo agente.", ("start", "ok", "error"), ("arguments", "summary"), "nickel/core/agent.py"),
-        _spec("llm", "Chamadas ao modelo de linguagem.", ("start", "done", "error"), ("step", "model", "backend", "duration_ms", "prompt_tokens", "completion_tokens", "tokens_per_second", "tool_calls", "detail"), "nickel/core/agent.py"),
+        _spec("llm", "Chamadas ao modelo de linguagem.", ("start", "done", "error"), ("step", "model", "backend", "requested_backend", "duration_ms", "prompt_tokens", "completion_tokens", "tokens_per_second", "tool_calls", "detail"), "nickel/core/agent.py"),
         _spec("turn", "Ciclo completo de um turno de conversa.", ("start", "done", "error"), ("channel", "workspace", "chars", "duration_ms", "steps", "reply_chars", "detail"), "nickel/core/agent.py"),
         _spec("route", "Resolução da rota (workspace/skill) de um turno.", ("resolved",), ("command", "workspace", "switched", "auto"), "nickel/core/agent.py"),
         _spec("prompt", "Montagem do prompt enviado ao modelo.", ("built",), ("messages", "history", "tools", "system_chars", "est_tokens"), "nickel/core/agent.py"),

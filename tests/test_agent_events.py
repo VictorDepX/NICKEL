@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -93,7 +94,12 @@ def test_turn_emits_ordered_events_with_single_run_id(services, llm, registry):
     assert prompt["est_tokens"] == -(-chars // 4)
     llm_start = events[3]
     assert llm_start["name"] == services.settings.llm_model
-    assert llm_start["detail"] == {"step": 0, "model": services.settings.llm_model, "backend": "local"}
+    assert llm_start["detail"] == {
+        "step": 0,
+        "model": services.settings.llm_model,
+        "backend": "local",
+        "requested_backend": "local",
+    }
     first_done = events[4]["detail"]
     assert first_done["step"] == 0 and first_done["tool_calls"] == ["echo"]
     assert "prompt_tokens" not in first_done  # sem usage do servidor: chave omitida
@@ -181,7 +187,62 @@ def test_unexpected_exception_records_turn_error_and_reraises(services, registry
     services.llm = Exploding()
     with pytest.raises(RuntimeError, match="bug inesperado"):
         run(Agent(services, registry).handle(Turn(channel="ui", text="oi")))
-    assert _only(_events(services), "turn", "error")[0]["detail"] == {"detail": "bug inesperado"}
+    events = _events(services)
+    pairs = _pairs(events)
+    assert pairs[-3:] == [("llm", "start"), ("llm", "error"), ("turn", "error")]
+    assert _only(events, "llm", "error")[0]["detail"] == {"step": 0, "detail": "bug inesperado"}
+    assert _only(events, "turn", "error")[0]["detail"] == {"detail": "bug inesperado"}
+    assert not _only(events, "turn", "done")
+
+
+def test_stream_dropping_midway_closes_reasoning_and_turn(services, registry):
+    class DroppingStream(StreamingFakeLLM):
+        async def chat(self, messages, tools=None, options=None, on_delta=None):
+            assert on_delta is not None
+            on_delta("reasoning", "Vou procurar a resposta. ")
+            on_delta("reasoning", "Talvez")
+            raise LLMError("conexão caiu no meio do stream")
+
+    services.llm = DroppingStream()
+    reply = run(Agent(services, registry).handle(Turn(channel="ui", text="oi")))
+    assert reply.text == "O modelo local não respondeu (conexão caiu no meio do stream)."
+    events = _events(services)
+    llm_side = [p for p in _pairs(events) if p[0] in {"llm", "reasoning", "turn"} and p != ("reasoning", "progress")]
+    assert llm_side == [
+        ("turn", "start"),
+        ("llm", "start"),
+        ("reasoning", "final"),
+        ("llm", "error"),
+        ("turn", "error"),
+    ]
+    assert _only(events, "reasoning", "final")[0]["detail"]["text"] == "Vou procurar a resposta. Talvez"
+    assert not _only(events, "turn", "done")
+
+
+def test_cancelled_turn_records_turn_error_and_propagates(services, registry):
+    class Hanging:
+        def __init__(self) -> None:
+            self.entered = asyncio.Event()
+
+        async def chat(self, messages, tools=None):
+            self.entered.set()
+            await asyncio.Event().wait()  # nunca responde
+
+    hanging = Hanging()
+    services.llm = hanging
+
+    async def scenario():
+        task = asyncio.create_task(Agent(services, registry).handle(Turn(channel="ui", text="oi")))
+        await hanging.entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    run(scenario())
+    events = _events(services)
+    assert _pairs(events)[-1] == ("turn", "error")
+    assert events[-1]["detail"] == {"detail": "cancelado"}
+    assert not _only(events, "turn", "done")
 
 
 def test_turn_think_override_reaches_llm_options(services, llm, registry):
@@ -275,4 +336,22 @@ def test_llm_events_name_the_cloud_model_when_cloud_backend_is_used(services, ll
     run(Agent(services, registry).handle(Turn(channel="ui", text="/pesado oi")))
     start = _only(_events(services), "llm", "start")[0]
     assert start["name"] == "modelo-nuvem"
-    assert start["detail"] == {"step": 0, "model": "modelo-nuvem", "backend": "cloud"}
+    assert start["detail"] == {"step": 0, "model": "modelo-nuvem", "backend": "cloud", "requested_backend": "cloud"}
+
+
+def test_cloud_workspace_without_cloud_client_records_local_backend(services, llm, registry, settings):
+    settings.workspaces_dir.mkdir(parents=True, exist_ok=True)
+    (settings.workspaces_dir / "pesado.md").write_text("---\nname: Pesado\nbackend: cloud\n---\nLongo.\n", encoding="utf-8")
+    services.settings = services.settings.with_overrides(llm_cloud_model="modelo-nuvem")
+    services.workspaces = WorkspaceManager.from_settings(services.settings, StateStore(services.db))
+    services.llm_cloud = None
+    llm.queue(say("local"))
+    assert run(Agent(services, registry).handle(Turn(channel="ui", text="/pesado oi"))).text == "local"
+    start = _only(_events(services), "llm", "start")[0]
+    assert start["name"] == services.settings.llm_model
+    assert start["detail"] == {
+        "step": 0,
+        "model": services.settings.llm_model,
+        "backend": "local",
+        "requested_backend": "cloud",
+    }
