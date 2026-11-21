@@ -1,7 +1,6 @@
 """API de monitoramento: SSE, execuções, relatório, catálogo e `think` no chat."""
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
