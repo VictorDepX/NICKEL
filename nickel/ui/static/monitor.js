@@ -12,6 +12,8 @@ import {
   elapsedMs,
   reasoningSteps,
   reasoningView,
+  eventHint,
+  num,
   timelineKey as computeTimelineKey,
 } from "/static/monitor-core.js";
 
@@ -58,11 +60,6 @@ const clip = (text, max = 120) => {
   const s = String(text ?? "").replace(/\s+/g, " ").trim();
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 };
-
-function num(value, digits = 0) {
-  if (value == null || !Number.isFinite(Number(value))) return "—";
-  return Number(value).toLocaleString("pt-BR", { maximumFractionDigits: digits });
-}
 
 function clockTime(iso) {
   const date = new Date(iso);
@@ -237,6 +234,7 @@ function renderSummary(events) {
     ["Duração", s.status === "running" ? "em andamento" : formatDuration(s.durationMs)],
     ["Passos", s.steps != null ? num(s.steps) : null],
     ["Ferramentas usadas", num(s.toolCalls.length)],
+    ["Aviso", s.fakeAction ? "ação inventada pelo modelo" : null],
     ["Resposta", s.replyChars != null ? `${num(s.replyChars)} caracteres` : null],
     ["Erros", s.errors ? num(s.errors) : null],
     ["Motivo do erro", s.error ? clip(s.error, 300) : null],
@@ -303,23 +301,6 @@ function renderFilters() {
       ),
     ),
   );
-}
-
-function eventHint(e) {
-  const d = e.detail || {};
-  switch (`${e.kind}/${e.status}`) {
-    case "turn/start": return [d.channel && `canal ${d.channel}`, d.workspace, d.chars != null && `${d.chars} caracteres`].filter(Boolean).join(" · ");
-    case "route/resolved": return [d.workspace, d.command, d.switched && "trocou de área"].filter(Boolean).join(" · ");
-    case "prompt/built": return `${num(d.messages)} mensagens · ~${num(d.est_tokens)} tokens`;
-    case "llm/start": return [d.step != null && `passo ${d.step}`, d.model, d.backend].filter(Boolean).join(" · ");
-    case "llm/done": return [d.completion_tokens != null && `${num(d.completion_tokens)} tokens`, d.tokens_per_second != null && `${num(d.tokens_per_second, 1)} tok/s`, d.tool_calls && `${d.tool_calls} chamadas`].filter(Boolean).join(" · ");
-    case "reasoning/progress": return `${num(d.chars)} caracteres`;
-    case "reasoning/final": return d.headline || "";
-    case "tool/ok":
-    case "tool/error": return d.summary || "";
-    case "turn/done": return [d.steps != null && `${d.steps} passos`, d.reply_chars != null && `${num(d.reply_chars)} caracteres`].filter(Boolean).join(" · ");
-    default: return d.detail || "";
-  }
 }
 
 function eventItem(e) {
@@ -405,6 +386,12 @@ function setGroupMeta(ref) {
 }
 
 function appendEvents(ref) {
+  // Itens que saíram da linha do tempo (ex.: `reasoning/progress` trocado pelo mais novo) saem do DOM.
+  const alive = new Set(ref.group.events.map((e) => String(e.id)));
+  for (const item of [...ref.list.children]) {
+    const id = item.firstElementChild && item.firstElementChild.dataset.eventId;
+    if (id && !alive.has(id)) item.remove();
+  }
   const fresh = ref.group.events.filter((e) => e.id > ref.lastId);
   if (fresh.length) {
     ref.list.append(...fresh.slice(-EVENTS_PER_GROUP).map(eventItem));

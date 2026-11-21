@@ -34,7 +34,10 @@ def test_index_has_tabs_think_toggle_and_live_phase_label(client):
     html = client.get("/").text
     assert 'role="tablist"' in html
     assert ">Conversa<" in html and ">Monitor<" in html
-    assert 'id="think"' in html and "Mostrar raciocínio" in html
+    assert 'id="think"' in html and "Pensar antes de responder" in html
+    assert "Mostrar raciocínio" not in html
+    toggle = re.search(r'<label class="think-toggle" title="([^"]+)"', html)
+    assert toggle and "Monitor" in toggle.group(1)
     assert re.search(r'id="phase-label"[^>]*aria-live="polite"', html)
     assert 'id="reasoning-empty-text"' in html and 'id="reasoning-steps"' in html
 
@@ -59,7 +62,16 @@ def test_monitor_css_respects_reduced_motion():
 
 def test_app_sends_think_and_translates_voice_state():
     app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    assert 'think: $("think").checked' in app_js
+    # Sem toque do usuário vai `null` (o servidor decide); depois de mexer, vai a escolha guardada.
+    assert "think: thinkChoice()" in app_js
+    assert 'think: $("think").checked' not in app_js
+    choice = re.search(r"function thinkChoice\(\) \{(.*?)\n\}", app_js, re.S)
+    assert choice, "thinkChoice ausente"
+    body = choice.group(1)
+    assert 'storageGet("nickel.think")' in body or "storageGet(THINK_KEY)" in body
+    assert re.search(r'"1"\s*\?\s*true', body) and re.search(r'"0"\s*\?\s*false', body)
+    assert body.rstrip().rstrip(";").endswith(": null")
+    assert "think_default" in app_js  # sem escolha, a caixa mostra o padrão efetivo do servidor
     assert "think: true" not in app_js
     assert "localStorage" in app_js
     assert "transcrevendo" in app_js

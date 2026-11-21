@@ -98,7 +98,7 @@ function pruneRuns(runs, timeline) {
   return out;
 }
 
-function trackRun(runs, event) {
+function trackRun(runs, event, replaced) {
   if (!event.run_id) return runs;
   const prev = runs[event.run_id] || { startedAt: event.at, events: 0, errors: 0 };
   return {
@@ -106,18 +106,31 @@ function trackRun(runs, event) {
     [event.run_id]: {
       ...prev,
       lastAt: event.at,
-      events: prev.events + 1,
+      events: prev.events + (replaced ? 0 : 1),
       errors: prev.errors + (event.status === "error" ? 1 : 0),
     },
   };
+}
+
+const isProgress = (e) => e.kind === "reasoning" && e.status === "progress";
+const stepOf = (e) => String((e.detail || {}).step ?? 0);
+
+// Um `reasoning/progress` novo substitui o anterior do mesmo run e passo: o parcial chega
+// até 2,5 vezes por segundo e, sem isto, empurraria `turn/start` para fora da linha do tempo.
+function withoutOlderProgress(timeline, event) {
+  if (!isProgress(event)) return timeline;
+  const run = event.run_id ?? null;
+  const step = stepOf(event);
+  return timeline.filter((e) => !(isProgress(e) && (e.run_id ?? null) === run && stepOf(e) === step));
 }
 
 export function applyEvent(state, event, catalog) {
   if (!event || typeof event.id !== "number" || event.id <= state.lastId) return state;
 
   const detail = event.detail || {};
-  const timeline = [...state.timeline, event].slice(-TIMELINE_LIMIT);
-  let runs = trackRun(state.runs, event);
+  const base = withoutOlderProgress(state.timeline, event);
+  const timeline = [...base, event].slice(-TIMELINE_LIMIT);
+  let runs = trackRun(state.runs, event, base.length < state.timeline.length);
   if (state.timeline.length >= TIMELINE_LIMIT) runs = pruneRuns(runs, timeline);
   const next = { ...state, lastId: event.id, timeline, runs };
 
@@ -210,6 +223,7 @@ export function runSummary(events) {
     messages: null, history: null, tools: null, systemChars: null, estTokens: null,
     promptTokens: null, completionTokens: null, tokensPerSecond: null,
     toolCalls: [], errors: 0, steps: null, durationMs: null, replyChars: null, error: null,
+    fakeAction: null,
   };
   for (const e of byId(events)) {
     const d = e.detail || {};
@@ -244,6 +258,11 @@ export function runSummary(events) {
         break;
       case "tool/ok":
       case "tool/error":
+        if (e.name === FAKE_TOOL) {
+          // Não é ferramenta: o modelo afirmou uma ação sem chamá-la.
+          s.fakeAction = d.detail || d.summary || "ação inventada pelo modelo";
+          break;
+        }
         s.toolCalls.push({ name: e.name, ok: e.status === "ok", summary: d.summary ?? null, durationMs: e.duration_ms ?? null });
         break;
       case "turn/done":
@@ -276,6 +295,36 @@ export function runPhases(events, catalog) {
     out[i].ms = Number.isFinite(ms) ? Math.max(0, ms) : null;
   }
   return out;
+}
+
+export const FAKE_TOOL = "<fake>";
+
+export function num(value, digits = 0) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return Number(value).toLocaleString("pt-BR", { maximumFractionDigits: digits });
+}
+
+// Resumo de uma linha de um evento, para a linha do tempo.
+export function eventHint(e) {
+  const d = e.detail || {};
+  switch (`${e.kind}/${e.status}`) {
+    case "turn/start": return [d.channel && `canal ${d.channel}`, d.workspace, d.chars != null && `${d.chars} caracteres`].filter(Boolean).join(" · ");
+    case "route/resolved": return [d.workspace, d.command, d.switched && "trocou de área"].filter(Boolean).join(" · ");
+    case "prompt/built": return `${num(d.messages)} mensagens · ~${num(d.est_tokens)} tokens`;
+    case "llm/start": return [d.step != null && `passo ${d.step}`, d.model, d.backend].filter(Boolean).join(" · ");
+    case "llm/done": return [
+      d.completion_tokens != null && `${num(d.completion_tokens)} tokens`,
+      d.tokens_per_second != null && `${num(d.tokens_per_second, 1)} tok/s`,
+      Array.isArray(d.tool_calls) && d.tool_calls.length ? `${d.tool_calls.length} chamada(s): ${d.tool_calls.join(", ")}` : null,
+    ].filter(Boolean).join(" · ");
+    case "reasoning/progress": return `${num(d.chars)} caracteres`;
+    case "reasoning/answering": return d.step != null ? `passo ${d.step}` : "";
+    case "reasoning/final": return d.headline || "";
+    case "tool/ok":
+    case "tool/error": return d.summary || d.detail || "";
+    case "turn/done": return [d.steps != null && `${d.steps} passos`, d.reply_chars != null && `${num(d.reply_chars)} caracteres`].filter(Boolean).join(" · ");
+    default: return d.detail || "";
+  }
 }
 
 export function elapsedMs(since, nowMs) {

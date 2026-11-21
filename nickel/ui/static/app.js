@@ -22,6 +22,15 @@ function storageSet(key, value) {
   try { localStorage.setItem(key, value); } catch { /* armazenamento indisponível */ }
 }
 
+// "Pensar antes de responder" tem três estados: true/false depois que o usuário mexe na caixa;
+// null enquanto ele não mexe, e aí o servidor decide (workspace ativo ou LLM_THINK).
+const THINK_KEY = "nickel.think";
+
+function thinkChoice() {
+  const stored = storageGet(THINK_KEY);
+  return stored === "1" ? true : stored === "0" ? false : null;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "content-type": "application/json" },
@@ -146,6 +155,7 @@ function pill(label, level, title) {
 }
 
 function renderState(state) {
+  if (thinkChoice() === null && typeof state.think_default === "boolean") $("think").checked = state.think_default;
   const status = $("status");
   const level = (s) => (s === "ready" ? "ok" : s === "needs_connection" ? "warn" : "bad");
   status.replaceChildren(
@@ -209,8 +219,8 @@ $("composer").addEventListener("submit", async (event) => {
   button.disabled = true;
   input.value = "";
   try {
-    // Marcado = pensar; desmarcado = não pensar, mesmo que o servidor tenha LLM_THINK=true.
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ text, think: $("think").checked }) });
+    // Só manda a escolha se o usuário mexeu na caixa; senão `null` e vale o padrão do servidor.
+    await api("/api/chat", { method: "POST", body: JSON.stringify({ text, think: thinkChoice() }) });
   } catch (error) {
     alert(`Falha ao enviar: ${error.message}`);
     input.value = text;
@@ -229,8 +239,8 @@ $("input").addEventListener("keydown", (event) => {
 
 $("audit-panel").addEventListener("toggle", refresh);
 
-$("think").checked = storageGet("nickel.think") === "1";
-$("think").addEventListener("change", (event) => storageSet("nickel.think", event.target.checked ? "1" : "0"));
+$("think").checked = thinkChoice() === true; // até /api/state trazer think_default
+$("think").addEventListener("change", (event) => storageSet(THINK_KEY, event.target.checked ? "1" : "0"));
 
 // Abas "Conversa" e "Monitor": a escolha fica guardada; o monitor escuta "nickel:tab".
 function showTab(name, focus = false) {

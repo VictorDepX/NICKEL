@@ -13,6 +13,7 @@ import {
   reasoningSteps,
   reasoningView,
   timelineKey,
+  eventHint,
 } from "../../nickel/ui/static/monitor-core.js";
 
 const catalog = {
@@ -318,4 +319,86 @@ test("timelineKey só muda quando o resultado filtrado muda", () => {
   assert.notEqual(timelineKey(s.timeline, noReasoning, 1), before);
   s = applyEvent(s, ev("tool", "start"), catalog);
   assert.notEqual(timelineKey(s.timeline, noReasoning, 0), before);
+});
+
+// ---------------------------------------------------------------- revisão final
+
+test("linha do tempo guarda só o último progress de cada execução e passo", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+  const progress = (step, run_id = "r1") => ev("reasoning", "progress", { run_id, detail: { step, tail: `p${nextId}` } });
+  for (let i = 0; i < 5; i++) s = applyEvent(s, progress(0), catalog);
+  s = applyEvent(s, progress(1), catalog);
+  s = applyEvent(s, progress(1), catalog);
+  s = applyEvent(s, progress(0, "r2"), catalog);
+  s = applyEvent(s, ev("reasoning", "final", { detail: { step: 0, text: "fim" } }), catalog);
+  const kept = s.timeline.map((e) => [e.run_id, e.kind, e.status, e.detail.step ?? null, e.id]);
+  assert.deepEqual(kept, [
+    ["r1", "turn", "start", null, 1],
+    ["r1", "reasoning", "progress", 0, 6],
+    ["r1", "reasoning", "progress", 1, 8],
+    ["r2", "reasoning", "progress", 0, 9],
+    ["r1", "reasoning", "final", 0, 10],
+  ]);
+  assert.equal(s.lastId, 10);
+  assert.equal(reasoningSteps(s)[0].final, "fim");
+});
+
+test("muitos progress não empurram turn/start para fora da linha do tempo", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+  for (let i = 0; i < 2000; i++) s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 0, tail: "x" } }), catalog);
+  assert.equal(s.timeline.length, 2);
+  assert.equal(s.timeline[0].status, "start");
+});
+
+test("fase vai de Pensando para Respondendo quando chega reasoning/answering", () => {
+  nextId = 1;
+  const cat = {
+    phases: { "turn/start": "routing", "llm/start": "thinking", "reasoning/progress": "thinking", "reasoning/answering": "answering", "turn/done": "idle" },
+  };
+  let s = applyEvent(initialState(), ev("turn", "start"), cat);
+  s = applyEvent(s, ev("llm", "start", { detail: { step: 0 } }), cat);
+  s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 0, tail: "penso" } }), cat);
+  assert.equal(s.phase, "thinking");
+  s = applyEvent(s, ev("llm", "done", { detail: { step: 0, tool_calls: [] } }), cat);
+  assert.equal(s.phase, "thinking"); // llm/done não inventa a fase
+  s = applyEvent(s, ev("reasoning", "answering", { at: "2026-11-19T10:00:07.250+00:00", detail: { step: 0 } }), cat);
+  assert.equal(s.phase, "answering");
+  assert.equal(s.since, "2026-11-19T10:00:07.250+00:00");
+  const phases = runPhases(s.timeline, cat).map((p) => p.phase);
+  assert.deepEqual(phases, ["routing", "thinking", "answering"]);
+});
+
+test("runPhases mede durações com milissegundos", () => {
+  nextId = 1;
+  const cat = { phases: { "turn/start": "routing", "llm/start": "thinking", "turn/done": "idle" } };
+  const events = [
+    ev("turn", "start", { at: "2026-11-19T10:00:00.100+00:00" }),
+    ev("llm", "start", { at: "2026-11-19T10:00:00.350+00:00" }),
+    ev("turn", "done", { at: "2026-11-19T10:00:01+00:00" }), // formato antigo convive
+  ];
+  assert.deepEqual(runPhases(events, cat).map((p) => p.ms), [250, 650, null]);
+});
+
+test("eventHint de llm/done lista as chamadas pedidas", () => {
+  nextId = 1;
+  assert.equal(eventHint(ev("llm", "done", { detail: { tool_calls: ["echo", "notes_add"] } })), "2 chamada(s): echo, notes_add");
+  assert.equal(eventHint(ev("llm", "done", { detail: { tool_calls: [], completion_tokens: 5 } })), "5 tokens");
+});
+
+test("<fake> aparece na linha do tempo e no resumo, fora das ferramentas usadas", () => {
+  nextId = 1;
+  const fake = ev("tool", "error", { name: "<fake>", detail: { detail: "modelo afirmou ação sem chamar a ferramenta" } });
+  assert.equal(eventHint(fake), "modelo afirmou ação sem chamar a ferramenta");
+  assert.equal(eventHint(ev("tool", "ok", { detail: { summary: "eco: a" } })), "eco: a");
+  const s = runSummary([
+    ev("turn", "start"),
+    ev("tool", "ok", { name: "echo", duration_ms: 3, detail: { summary: "eco: a" } }),
+    fake,
+    ev("turn", "done", { duration_ms: 10, detail: { steps: 1 } }),
+  ]);
+  assert.deepEqual(s.toolCalls.map((t) => t.name), ["echo"]);
+  assert.equal(s.fakeAction, "modelo afirmou ação sem chamar a ferramenta");
+  assert.equal(runSummary([ev("turn", "start")]).fakeAction, null);
 });
