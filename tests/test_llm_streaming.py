@@ -199,6 +199,40 @@ def test_retry_only_before_first_byte(settings):
     assert calls["n"] == 1
 
 
+def test_openai_stream_in_band_error_chunk_raises(settings):
+    body = sse(delta(content="Ol"), {"error": {"message": "boom"}}, "[DONE]")
+    got, on_delta = collect()
+    with pytest.raises(LLMError, match="boom"):
+        run(oai(settings, lambda r: httpx.Response(200, content=body)).chat(MSGS, on_delta=on_delta))
+    assert got == [("content", "Ol")]
+
+
+def test_openai_stream_error_event_line_raises(settings):
+    body = sse(delta(content="Ol")) + b'error: {"message": "oom"}\n\n'
+    with pytest.raises(LLMError, match="oom"):
+        run(oai(settings, lambda r: httpx.Response(200, content=body)).chat(MSGS, on_delta=lambda c, t: None))
+
+
+def test_openai_stream_without_done_raises(settings):
+    body = sse(delta(content="Ol"))
+    with pytest.raises(LLMError, match="sem \\[DONE\\]"):
+        run(oai(settings, lambda r: httpx.Response(200, content=body)).chat(MSGS, on_delta=lambda c, t: None))
+
+
+def test_ollama_stream_in_band_error_raises(settings):
+    body = (json.dumps({"message": {"content": "Ol"}, "done": False}) + "\n" + json.dumps({"error": "model crashed"}) + "\n").encode()
+    client = OllamaClient(settings, transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)))
+    with pytest.raises(LLMError, match="model crashed"):
+        run(client.chat(MSGS, on_delta=lambda c, t: None))
+
+
+def test_ollama_stream_without_done_raises(settings):
+    body = (json.dumps({"message": {"content": "Ol"}, "done": False}) + "\n").encode()
+    client = OllamaClient(settings, transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)))
+    with pytest.raises(LLMError, match="done"):
+        run(client.chat(MSGS, on_delta=lambda c, t: None))
+
+
 def _real(name: str, settings):
     body = (FIXTURES / name).read_bytes()
     got, on_delta = collect()

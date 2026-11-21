@@ -198,6 +198,20 @@ class _StreamState:
         return "".join(self.content), "".join(self.reasoning)
 
 
+def _loads_or_raw(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text.strip()
+
+
+def _error_text(error: Any) -> str:
+    """Texto legível de um erro em banda (`{"message": ...}` ou string)."""
+    if isinstance(error, dict):
+        error = error.get("message") or json.dumps(error, ensure_ascii=False)
+    return str(error)[:300]
+
+
 def _json_lines_error(exc: Exception) -> LLMError:
     return LLMError(f"Streaming interrompido: {exc}")
 
@@ -338,6 +352,7 @@ class OllamaClient:
         state = _StreamState(on_delta)
         tool_calls: list[Any] = []
         usage: dict[str, float] = {}
+        done = False
         try:
             async with self._client.stream("POST", "/api/chat", json=payload) as response:
                 if response.status_code >= 400:
@@ -350,6 +365,8 @@ class OllamaClient:
                         data = json.loads(line)
                     except ValueError as exc:
                         raise LLMError(f"Linha de streaming inválida: {line[:200]}") from exc
+                    if data.get("error"):
+                        raise LLMError(f"Ollama falhou durante o streaming: {_error_text(data['error'])}")
                     message = data.get("message") or {}
                     if message.get("thinking"):
                         state.add_reasoning(message["thinking"])
@@ -357,9 +374,12 @@ class OllamaClient:
                         state.add_content(message["content"])
                     tool_calls.extend(message.get("tool_calls") or [])
                     if data.get("done"):
+                        done = True
                         usage = _ollama_usage(data)
         except httpx.HTTPError as exc:
             raise LLMError(f"Ollama inacessível em {self.settings.llm_base_url}: {exc}") from exc
+        if not done:
+            raise LLMError("Streaming do Ollama terminou sem done: true")
         content, reasoning = state.finish()
         reply = _parse_message({"content": content, "tool_calls": tool_calls}, {})
         reply.reasoning = reasoning
@@ -517,6 +537,7 @@ class OpenAICompatClient:
         calls: dict[int, dict[str, Any]] = {}
         usage: dict[str, Any] = {}
         timings: dict[str, Any] = {}
+        finished = False
         async with self._client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as response:
             if response.status_code >= 400:
                 detail = (await response.aread()).decode("utf-8", "replace")[:200]
@@ -526,15 +547,20 @@ class OpenAICompatClient:
                 raise LLMError(message)
             try:
                 async for line in response.aiter_lines():
+                    if line.startswith("error:"):
+                        raise LLMError(f"Provedor falhou durante o streaming: {_error_text(_loads_or_raw(line[6:]))}")
                     if not line.startswith("data:"):
                         continue
                     body = line[5:].strip()
                     if body == "[DONE]":
+                        finished = True
                         break
                     try:
                         chunk = json.loads(body)
                     except ValueError:
                         continue
+                    if isinstance(chunk, dict) and chunk.get("error"):
+                        raise LLMError(f"Provedor falhou durante o streaming: {_error_text(chunk['error'])}")
                     usage.update(chunk.get("usage") or {})
                     timings.update(chunk.get("timings") or {})
                     for choice in chunk.get("choices") or []:
@@ -554,6 +580,8 @@ class OpenAICompatClient:
                             slot["function"]["arguments"] += function.get("arguments") or ""
             except httpx.HTTPError as exc:
                 raise _json_lines_error(exc) from exc
+        if not finished:
+            raise LLMError("Streaming terminou sem [DONE]")
         content, reasoning = state.finish()
         reply = _parse_message(
             {"content": content, "tool_calls": [calls[key] for key in sorted(calls)]}, {}
