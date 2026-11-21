@@ -36,6 +36,17 @@ _YES = {
 _NO = {"nao", "n", "cancela", "cancelar", "cancelado", "deixa", "esquece", "no", "negativo", "para", "nem"}
 _FILLER = {"pode", "por", "favor", "pfv", "pf", "e", "isso", "mesmo", "precisa", "agora", "ai", "la"}
 
+# Marcador textual que versões antigas punham no histórico; o modelo aprendeu a imitá-lo sem chamar a tool.
+_FAKE_ACTION_MARKER = re.compile(r"[ \t]*\n?[ \t]*\[\s*a[çc][õo]es\s+executadas\s*:[^\]]*\]", re.IGNORECASE)
+_FAKE_ACTION_WARNING = "(Atenção: nenhuma ação foi executada.)"
+
+
+def strip_fake_action_marker(text: str) -> str:
+    """Remove blocos `[ações executadas: …]` (até o `]`, mesmo em várias linhas) do texto."""
+    if not _FAKE_ACTION_MARKER.search(text):
+        return text
+    return _FAKE_ACTION_MARKER.sub("", text).strip()
+
 
 def classify_confirmation(text: str) -> str | None:
     """Devolve 'yes', 'no' ou None (mensagem não é uma confirmação)."""
@@ -271,23 +282,58 @@ class Agent:
         return AgentReply(
             text=result.summary,
             links=ctx.links,
-            tools=[{"name": pending.tool, "ok": result.ok, "summary": result.summary}],
+            tools=[
+                {
+                    "name": pending.tool,
+                    "ok": result.ok,
+                    "summary": result.summary,
+                    "arguments": pending.arguments,
+                    "id": f"pending-{pending.id}",
+                }
+            ],
         )
 
     def _history_messages(self, history: list[StoredMessage]) -> list[dict[str, Any]]:
+        """Histórico para o LLM; ações passadas voltam como tool calls reais, nunca como texto."""
         messages: list[dict[str, Any]] = []
         for item in history:
             if item.role not in {"user", "assistant"}:
                 continue
             content = item.content
+            actions: list[dict[str, Any]] = []
             for attachment in item.attachments:
                 if attachment.get("type") == "image":
                     content = f"[imagem enviada] {content}".strip()
                 elif attachment.get("type") == "tools":
-                    actions = "; ".join(f"{t['name']}: {t['summary']}" for t in attachment.get("items", []))
-                    content = f"{content}\n[ações executadas: {actions}]"
+                    actions.extend(attachment.get("items") or [])
+            if item.role == "assistant":
+                content = strip_fake_action_marker(content)
+                if actions:
+                    messages.extend(self._replayed_actions(item.id, actions))
             messages.append({"role": item.role, "content": content})
         return messages
+
+    @staticmethod
+    def _replayed_actions(message_id: int, actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Mesma forma que `_run_llm` monta dentro do turno: assistant com `tool_calls` e um `tool` por ação."""
+        calls: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
+        for index, action in enumerate(actions):
+            name = action.get("name", "")
+            arguments = action.get("arguments")
+            call_id = action.get("id") or f"hist-{message_id}-{index}"
+            calls.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments if isinstance(arguments, dict) else {}},
+                }
+            )
+            prefix = "ok: " if action.get("ok") else "erro: "
+            results.append(
+                {"role": "tool", "tool_call_id": call_id, "tool_name": name, "content": prefix + action.get("summary", "")}
+            )
+        return [{"role": "assistant", "content": "", "tool_calls": calls}, *results]
 
     async def _run_llm(
         self, turn: Turn, history: list[StoredMessage], workspace: Workspace, stats: _TurnStats
@@ -368,7 +414,13 @@ class Agent:
             if not reply.tool_calls:
                 fallback = "Feito." if executed else "Sem resposta do modelo."
                 text = reply.content or fallback
-                return AgentReply(text=text, tools=executed, links=ctx.links)
+                cleaned = strip_fake_action_marker(text)
+                if cleaned != text and not executed:  # afirmou ação sem chamar a tool
+                    self.services.audit.record(
+                        "tool", "<fake>", "error", {"detail": "modelo afirmou ação sem chamar a ferramenta"}
+                    )
+                    cleaned = f"{cleaned}\n{_FAKE_ACTION_WARNING}" if cleaned else _FAKE_ACTION_WARNING
+                return AgentReply(text=cleaned or fallback, tools=executed, links=ctx.links)
 
             messages.append(
                 {
@@ -400,7 +452,15 @@ class Agent:
                         )
                     else:
                         result = await self._run_tool(tool.name, ctx, arguments)
-                        executed.append({"name": tool.name, "ok": result.ok, "summary": result.summary})
+                        executed.append(
+                            {
+                                "name": tool.name,
+                                "ok": result.ok,
+                                "summary": result.summary,
+                                "arguments": arguments,
+                                "id": call.id,
+                            }
+                        )
                 messages.append(
                     {"role": "tool", "tool_call_id": call.id, "tool_name": call.name, "content": result.to_llm()}
                 )

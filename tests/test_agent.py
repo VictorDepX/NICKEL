@@ -59,11 +59,12 @@ def test_tool_result_goes_back_to_model(services, llm, registry):
     assert second_call[-2]["role"] == "assistant" and second_call[-2]["tool_calls"][0]["function"]["name"] == "echo"
     assert second_call[-1]["role"] == "tool" and "eco: abc" in second_call[-1]["content"]
     assert registry.executed == [{"tool": "echo", "text": "abc"}]
-    # O resumo da ação entra no histórico para o próximo turno
+    # A ação volta no histórico do próximo turno como tool call real, não como texto
     llm.queue(say("ok"))
     run(Agent(services, registry).handle(Turn(channel="ui", text="e agora?")))
-    history_text = " ".join(m["content"] for m in llm.calls[2]["messages"] if m["role"] == "assistant")
-    assert "echo: eco: abc" in history_text
+    tool_messages = [m for m in llm.calls[2]["messages"] if m["role"] == "tool"]
+    assert [(m["tool_name"], m["content"]) for m in tool_messages] == [("echo", "ok: eco: abc")]
+    assert all("[ações executadas" not in (m["content"] or "") for m in llm.calls[2]["messages"])
 
 
 def test_confirmation_flow_yes(services, llm, registry):
