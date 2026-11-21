@@ -4,7 +4,7 @@ Assistente pessoal com Qwen. Conversa pelo WhatsApp (texto, áudio e foto) e por
 
 - **Skills:** Spotify, reconhecimento de música (Spotify ou YouTube), pensamentos no Obsidian, lembretes que avisam no celular, Gmail, Google Agenda e memória opt-in.
 - **Workspaces:** perfis de trabalho (instruções, ferramentas, pasta de notas e histórico próprios) sobre o mesmo modelo, ao estilo dos Projetos do Claude. Troque com `/ws` e `/<nome>`. Veja [`workspaces/README.md`](workspaces/README.md).
-- **Decisões de arquitetura e trade-offs:** [`0001`](docs/adr/0001-arquitetura-v2.md) (arquitetura), [`0002`](docs/adr/0002-implantacao-oracle-runpod.md) (Oracle + RunPod) e [`0003`](docs/adr/0003-workspaces-e-modelo-local.md) (workspaces e modelo local) e [`0004`](docs/adr/0004-monitor-e-auditoria.md) (monitor e auditoria).
+- **Decisões de arquitetura e trade-offs:** [`0001`](docs/adr/0001-arquitetura-v2.md) (arquitetura), [`0002`](docs/adr/0002-implantacao-oracle-runpod.md) (Oracle + RunPod), [`0003`](docs/adr/0003-workspaces-e-modelo-local.md) (workspaces e modelo local) e [`0004`](docs/adr/0004-monitor-e-auditoria.md) (monitor e auditoria).
 
 ```
 WhatsApp ─┐                                   ┌─ Spotify / ShazamIO / YouTube
@@ -92,7 +92,7 @@ Comandos: `nickel serve` · `nickel listen` (só modo local) · `nickel chat` (t
 
 ## Monitor e auditoria
 
-A aba **Monitor** da UI mostra, ao vivo, a fase do agente (roteando, pensando, executando ferramenta etc.), o raciocínio do modelo, as ferramentas usadas e a linha do tempo de cada execução. Para ver o raciocínio, ligue **Mostrar raciocínio** na aba. O monitor não tem autenticação e escuta só em `127.0.0.1`.
+A aba **Monitor** da UI mostra, ao vivo, a fase do agente (roteando, pensando, executando ferramenta etc.), o raciocínio do modelo, as ferramentas usadas e a linha do tempo de cada execução. Para o modelo pensar antes de responder, marque **Pensar antes de responder** no campo de mensagem da aba Conversa; sem mexer na caixa, vale o padrão do servidor (`think` do workspace ativo ou `LLM_THINK`). O monitor não tem autenticação. O servidor escuta só em `127.0.0.1`, mas o guia da Oracle ([seção 6](docs/deploy/oracle-runpod.md#6-celular-opcional)) publica a UI, com o monitor, na sua tailnet com `tailscale serve`: qualquer aparelho da tailnet consegue abri-la.
 
 Pela linha de comando:
 

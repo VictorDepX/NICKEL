@@ -16,6 +16,7 @@ Um turno do NICKEL passa por roteamento, montagem de prompt, chamadas ao modelo,
 4. **Resumo de raciocínio determinístico**, sem segunda chamada ao modelo.
 5. **SSE com assinatura antes do replay**, backfill paginado e detecção de lacunas. Há uma só definição de duração de run: a do evento `turn` final, ou a soma das durações.
 6. **Eventos `llm` registram o backend realmente usado**, além de `requested_backend`.
+7. **`reasoning/progress` é efêmero no banco.** Vai ao vivo para os assinantes, mas sai do SQLite quando chega o `reasoning/final` do mesmo run e passo. Sobras com mais de 1 h (turnos que caíram antes do `final`) são apagadas no startup.
 
 ## Medições (PC do Victor)
 
@@ -33,8 +34,9 @@ Isso atende o item de ação 4 do ADR-0003 para velocidade.
 
 ## Limites conhecidos
 
-- O monitor não tem autenticação; escuta apenas em `127.0.0.1`.
-- `PHASES` rotula `llm/done` como "Respondendo" mesmo quando o modelo pede uma ferramenta.
+- O monitor não tem autenticação. O servidor escuta em `127.0.0.1`, mas o guia da Oracle o publica na tailnet com `tailscale serve`.
+- "Respondendo" só aparece com streaming: sem `on_delta`, o turno fica em "Pensando" até terminar.
+- ~~`PHASES` rotulava `llm/done` como "Respondendo" mesmo quando o modelo pedia uma ferramenta.~~ Corrigido: a fase vem de `reasoning/answering`, gravado no primeiro trecho real da resposta.
 
 ## Consequências
 
@@ -45,5 +47,5 @@ Isso atende o item de ação 4 do ADR-0003 para velocidade.
 
 1. [x] Barramento, catálogo, SSE, aba Monitor e relatórios.
 2. [x] Documentação gerada e CLI de auditoria.
-3. [ ] Autenticação do monitor, se for exposto fora de `127.0.0.1`.
-4. [ ] Rotular `llm/done` com chamada de ferramenta como "Pensando".
+3. [ ] Autenticação do monitor, se for exposto fora de `127.0.0.1` (o `tailscale serve` do guia da Oracle já expõe na tailnet).
+4. [x] "Respondendo" vem de `reasoning/answering`, não de `llm/done`.

@@ -5,7 +5,7 @@
   O modelo é MoE: os pesos dos experts ficam na RAM e só atenção/camadas fixas ocupam a VRAM.
   -NCpuMoe 30 (padrão) mantém na RAM os experts das 30 primeiras camadas e leva o resto para a GPU.
   Medido numa RX 6600 8 GB + 20 GB RAM: ~21 tok/s de geração e ~190 tok/s de prefill. Use -NCpuMoe -1 (--cpu-moe) se faltar VRAM.
-  se faltar VRAM ou RAM, aumente o contexto menos ou troque a quantização.
+  Sem mmap é o padrão (-Mmap liga). -NoMmap ainda é aceito, mas é obsoleto e não muda nada.
 .EXAMPLE
   .\start-llama.ps1
   .\start-llama.ps1 -NCpuMoe 30 -Ctx 8192 -Vision
@@ -21,9 +21,11 @@ param(
     [int]$NCpuMoe = 30,
     [int]$Threads = 0,
     [switch]$KvQuant,
-    [switch]$Mmap
+    [switch]$Mmap,
+    [switch]$NoMmap  # obsoleto: sem mmap já é o padrão
 )
 $ErrorActionPreference = "Stop"
+if ($NoMmap) { Write-Warning "-NoMmap está obsoleto e não muda nada: sem mmap já é o padrão (use -Mmap para ligar)." }
 
 $server = Get-ChildItem -Path $LlamaDir -Recurse -Filter "llama-server.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $server) { throw "llama-server.exe não encontrado em $LlamaDir. Rode scripts\windows\get-llama.ps1 ou use -LlamaDir." }
