@@ -63,10 +63,28 @@ function li(html, className = "") {
 }
 
 // ------------------------------------------------------------ fala
-// "Parar" aparece enquanto a fase é "speaking": o monitor.js já acompanha a fase ao vivo (SSE) e avisa
-// com "nickel:phase". Ao clicar em "Ouvir", o botão aparece na hora, sem esperar o evento `tts/start`.
+// "Parar" aparece entre `tts/start` e `tts/done`/`tts/error`: o monitor.js recebe os eventos ao vivo (SSE)
+// e avisa com "nickel:speech". Ao clicar em "Ouvir", o botão aparece na hora, sem esperar o `tts/start`.
+const VOICE_OFF_TITLE = "Voz desligada: configure TTS_PROVIDER (VoiceStudio ou Piper) para ouvir as respostas.";
+let voiceOn = true; // até /api/state dizer o contrário
+
 function showStop(visible) {
   $("stop-speech").hidden = !visible;
+}
+
+// Sem provedor de voz, "Ouvir" e "Falar respostas" ficam desativados, com o motivo no título.
+function setVoiceOn(on) {
+  voiceOn = on;
+  const toggle = $("speak");
+  toggle.disabled = !on;
+  toggle.parentElement.title = on ? toggle.parentElement.dataset.title : VOICE_OFF_TITLE;
+  document.querySelectorAll("button.listen").forEach((button) => syncListen(button));
+  if (!on) showStop(false);
+}
+
+function syncListen(button) {
+  button.disabled = !voiceOn;
+  button.title = voiceOn ? "Ouça esta resposta em voz alta" : VOICE_OFF_TITLE;
 }
 
 async function speakText(text) {
@@ -84,7 +102,7 @@ function listenButton(text) {
   button.type = "button";
   button.className = "listen";
   button.textContent = "Ouvir";
-  button.title = "Ouça esta resposta em voz alta";
+  syncListen(button);
   button.addEventListener("click", () => speakText(text));
   return button;
 }
@@ -182,6 +200,7 @@ function pill(label, level, title) {
 }
 
 function renderState(state) {
+  setVoiceOn(Boolean(state.voice && state.voice.tts && state.voice.tts.provider));
   if (thinkChoice() === null && typeof state.think_default === "boolean") $("think").checked = state.think_default;
   const status = $("status");
   const level = (s) => (s === "ready" ? "ok" : s === "needs_connection" ? "warn" : "bad");
@@ -281,7 +300,8 @@ $("stop-speech").addEventListener("click", () => {
   showStop(false);
   api("/api/tts/stop", { method: "POST" }).catch((error) => alert(`Falha ao parar: ${error.message}`));
 });
-window.addEventListener("nickel:phase", (event) => showStop(event.detail === "speaking"));
+window.addEventListener("nickel:speech", (event) => showStop(event.detail === "start"));
+$("speak").parentElement.dataset.title = $("speak").parentElement.title;
 
 $("think").checked = thinkChoice() === true; // até /api/state trazer think_default
 $("think").addEventListener("change", (event) => storageSet(THINK_KEY, event.target.checked ? "1" : "0"));

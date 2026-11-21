@@ -124,6 +124,15 @@ function withoutOlderProgress(timeline, event) {
   return timeline.filter((e) => !(isProgress(e) && (e.run_id ?? null) === run && stepOf(e) === step));
 }
 
+// Sinal de fala para a GUI: "start" mostra "Parar"; "end" (tts/done ou tts/error) esconde.
+// Independe da fase: um tts/error sem tts/start (voz desligada) não muda a fase, mas encerra a fala.
+export function speechSignal(event) {
+  if (!event || event.kind !== "tts") return null;
+  if (event.status === "start") return "start";
+  if (event.status === "done" || event.status === "error") return "end";
+  return null;
+}
+
 export function applyEvent(state, event, catalog) {
   if (!event || typeof event.id !== "number" || event.id <= state.lastId) return state;
 

@@ -23,6 +23,9 @@ from nickel.core.stores import (
 from nickel.core.workspaces import Workspace, WorkspaceManager
 
 
+VOICE_OFF = "voz indisponível"
+
+
 def module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
@@ -56,6 +59,7 @@ class Services:
     tts_provider: str | None = None  # "voicestudio" | "piper" | None (preenchido por build_services)
     _tts_cache: tuple[float, dict[str, Any]] | None = field(default=None, init=False, repr=False)
     _speech: asyncio.Task | None = field(default=None, init=False, repr=False)
+    _speech_gen: int = field(default=0, init=False, repr=False)
 
     @classmethod
     def core(cls, settings: Settings, llm: LLMClient, db: Database | None = None) -> "Services":
@@ -99,21 +103,29 @@ class Services:
         self._tts_cache = (now, result)
         return {"provider": provider, **result}
 
-    async def speak(self, text: str, *, source: str) -> None:
+    async def speak(self, text: str, *, source: str) -> str | None:
         """Fala `text` com auditoria (`tts/start` → `tts/done` | `tts/error`). Nunca levanta.
 
-        Uma fala nova interrompe a anterior e espera ela registrar o fim, para a fase não
-        voltar a "Ocioso" no meio da nova. A síntese roda numa tarefa própria: cancelá-la
-        (`stop_speaking`) não derruba quem chamou (ex.: a sessão de voz).
+        Devolve a mensagem de erro, ou None (falou, foi interrompida ou substituída).
+        Só uma síntese fica ativa: cada chamada pega uma geração nova; a fala anterior é
+        cancelada e registra o fim antes de a nova começar, e quem foi substituído (ou
+        parado por `stop_speaking`) enquanto esperava não chega a falar. A síntese roda
+        numa tarefa própria: cancelá-la não derruba quem chamou (ex.: a sessão de voz).
         """
         if self.tts is None:
-            self.audit.record("tts", "tts", "error", {"source": source, "detail": "voz indisponível"})
-            return
+            self.audit.record("tts", "tts", "error", {"source": source, "detail": VOICE_OFF})
+            return VOICE_OFF
+        self._speech_gen += 1
+        gen = self._speech_gen
         self.tts.stop()
-        previous = self._speech
-        if previous is not None and not previous.done():
+        while self._speech is not None and not self._speech.done():
+            previous = self._speech
             previous.cancel()
             await asyncio.wait({previous})
+            if self._speech_gen != gen:
+                return None  # outra fala chegou depois, ou "Parar" foi pedido
+        if self._speech_gen != gen:
+            return None
         task = asyncio.create_task(self._speak_now(text, source))
         self._speech = task
         try:
@@ -121,8 +133,9 @@ class Services:
         except asyncio.CancelledError:
             task.cancel()
             raise
+        return None if task.cancelled() else task.result()
 
-    async def _speak_now(self, text: str, source: str) -> None:
+    async def _speak_now(self, text: str, source: str) -> str | None:
         provider = self.tts_provider or resolve_tts_provider(self.settings) or "tts"
         if provider == "voicestudio":
             voice = self.settings.voicestudio_voice
@@ -141,18 +154,28 @@ class Services:
         except asyncio.CancelledError:
             self.audit.record("tts", provider, "done", {"chars": chars, "interrupted": True}, duration_ms=elapsed())
         except Exception as exc:
-            self.audit.record(
-                "tts", provider, "error", {"source": source, "detail": str(exc) or type(exc).__name__}, duration_ms=elapsed()
-            )
+            message = str(exc) or type(exc).__name__
+            self.audit.record("tts", provider, "error", {"source": source, "detail": message}, duration_ms=elapsed())
+            return message
         else:
             self.audit.record("tts", provider, "done", {"chars": chars}, duration_ms=elapsed())
+        return None
 
     def stop_speaking(self) -> None:
-        """Para a reprodução e cancela a síntese em curso (que registra `tts/done` interrompido)."""
+        """Para a reprodução, cancela a síntese em curso (que registra `tts/done` interrompido)
+        e invalida falas que ainda esperavam a vez."""
+        self._speech_gen += 1
         if self.tts is not None:
             self.tts.stop()
         if self._speech is not None and not self._speech.done():
             self._speech.cancel()
+
+    async def shutdown_speech(self, timeout: float = 2.0) -> None:
+        """`stop_speaking` e espera (até `timeout` s) a fala registrar o fim. Usado no desligamento."""
+        self.stop_speaking()
+        task = self._speech
+        if task is not None and not task.done():
+            await asyncio.wait({task}, timeout=timeout)
 
     def llm_for(self, workspace: Workspace | None) -> LLMClient:
         """Backend do workspace. Sem `llm_cloud` configurado, `backend: cloud` cai no modelo local."""

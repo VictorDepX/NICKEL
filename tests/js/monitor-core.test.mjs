@@ -14,6 +14,7 @@ import {
   reasoningView,
   timelineKey,
   eventHint,
+  speechSignal,
 } from "../../nickel/ui/static/monitor-core.js";
 
 const catalog = {
@@ -401,4 +402,14 @@ test("<fake> aparece na linha do tempo e no resumo, fora das ferramentas usadas"
   assert.deepEqual(s.toolCalls.map((t) => t.name), ["echo"]);
   assert.equal(s.fakeAction, "modelo afirmou ação sem chamar a ferramenta");
   assert.equal(runSummary([ev("turn", "start")]).fakeAction, null);
+});
+
+test("speechSignal: tts/start mostra Parar; tts/done e tts/error escondem, mesmo sem mudar a fase", () => {
+  nextId = 1;
+  assert.equal(speechSignal(ev("tts", "start")), "start");
+  assert.equal(speechSignal(ev("tts", "done")), "end");
+  assert.equal(speechSignal(ev("tts", "error", { detail: { detail: "voz indisponível" } })), "end");
+  assert.equal(speechSignal(ev("voice", "speaking")), null);
+  assert.equal(speechSignal(ev("turn", "done")), null);
+  assert.equal(speechSignal(null), null);
 });

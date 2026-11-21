@@ -24,13 +24,20 @@ class FakeSpeaker:
         self.stops = 0
         self.fail = fail
         self.block = block
+        self.active = 0
+        self.max_active = 0
 
     async def speak(self, text: str) -> None:
         self.spoken.append(text)
-        if self.fail is not None:
-            raise self.fail
-        if self.block:
-            await asyncio.Event().wait()
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            if self.fail is not None:
+                raise self.fail
+            if self.block:
+                await asyncio.Event().wait()
+        finally:
+            self.active -= 1
 
     def stop(self) -> None:
         self.stops += 1
@@ -194,8 +201,99 @@ def test_ui_has_speak_toggle_listen_and_stop_buttons():
     assert re.search(r'<header class="topbar">.*id="speak".*Falar respostas.*</header>', html, re.S)
     assert re.search(r'id="stop-speech"[^>]*hidden', html)
     app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    for needle in ("/api/preferences", "/api/tts/speak", "/api/tts/stop", '"Ouvir"', "nickel:phase", '"speaking"'):
+    for needle in ("/api/preferences", "/api/tts/speak", "/api/tts/stop", '"Ouvir"', "nickel:speech", "voice.tts", "Voz desligada"):
         assert needle in app_js, needle
     assert "localStorage.setItem(\"nickel.speak" not in app_js  # a preferência fica no servidor
     monitor = (STATIC_DIR / "monitor.js").read_text(encoding="utf-8")
-    assert "nickel:phase" in monitor
+    assert "nickel:speech" in monitor and "speechSignal(" in monitor
+
+
+def _statuses(services) -> list[str]:
+    return [e["status"] for e in _tts(services)]
+
+
+def test_concurrent_speaks_play_only_the_last_one(services):
+    speaker = _with_speaker(services, FakeSpeaker(block=True))
+
+    async def scenario():
+        first = asyncio.create_task(services.speak("A", source="ui"))
+        while not speaker.spoken:
+            await asyncio.sleep(0)
+        # B e C chegam juntos enquanto A ainda está sendo cancelada.
+        second = asyncio.create_task(services.speak("B", source="ui"))
+        third = asyncio.create_task(services.speak("C", source="ui"))
+        while speaker.spoken[-1] != "C":
+            await asyncio.sleep(0)
+        await asyncio.wait_for(asyncio.gather(first, second), 1)
+        services.stop_speaking()
+        await asyncio.wait_for(third, 1)
+
+    run(scenario())
+    assert speaker.spoken == ["A", "C"]
+    assert speaker.max_active == 1
+    assert _statuses(services) == ["start", "done", "start", "done"]
+    starts = [e["detail"]["chars"] for e in _tts(services) if e["status"] == "start"]
+    assert starts == [1, 1]
+
+
+def test_stop_during_handoff_stops_everything(services):
+    speaker = _with_speaker(services, FakeSpeaker(block=True))
+
+    async def scenario():
+        first = asyncio.create_task(services.speak("A", source="ui"))
+        while not speaker.spoken:
+            await asyncio.sleep(0)
+        second = asyncio.create_task(services.speak("B", source="ui"))
+        await asyncio.sleep(0)  # B já cancelou A e espera ela registrar o fim
+        services.stop_speaking()
+        await asyncio.wait_for(asyncio.gather(first, second), 1)
+
+    run(scenario())
+    assert speaker.spoken == ["A"]
+    assert _statuses(services) == ["start", "done"]
+    assert services._speech is None or services._speech.done()
+
+
+def test_speak_returns_error_message_or_none(services):
+    _with_speaker(services, FakeSpeaker())
+    assert run(services.speak("Oi", source="ui")) is None
+    _with_speaker(services, FakeSpeaker(fail=RuntimeError("quebrou")))
+    assert run(services.speak("Oi", source="ui")) == "quebrou"
+    services.tts = None
+    assert run(services.speak("Oi", source="ui")) == "voz indisponível"
+
+
+def test_voice_session_notifies_when_speech_fails(services, llm):
+    llm.queue(say("Vai falhar."))
+    voice = _voice(services, llm, stt=FakeSTT(), tts=FakeSpeaker(fail=RuntimeError("VoiceStudio caiu")))
+    notes: list[str] = []
+
+    async def notify(body: str) -> None:
+        notes.append(body)
+
+    voice._notify = notify
+    run(voice._session())
+    assert "Erro na voz: VoiceStudio caiu" in notes
+    assert voice.state == "idle"
+
+
+def test_shutdown_stops_speech_before_system_shutdown(services):
+    speaker = _with_speaker(services, FakeSpeaker(block=True))
+    with _client(services) as client:
+        client.post("/api/tts/speak", json={"text": "Fala longa."})
+        _wait_for(lambda: speaker.spoken == ["Fala longa."])
+    events = list(reversed(services.audit.recent(500)))
+    keys = [(e["kind"], e["status"]) for e in events]
+    assert keys[-1] == ("system", "shutdown")
+    assert ("tts", "done") in keys and keys.index(("tts", "done")) < keys.index(("system", "shutdown"))
+    assert speaker.stops >= 2 and speaker.active == 0
+
+
+def test_chat_does_not_speak_when_voice_is_off(services, llm):
+    services.tts = None
+    services.state.set("ui.speak", "1")
+    llm.queue(say("Só texto."))
+    with _client(services) as client:
+        assert client.post("/api/chat", json={"text": "oi"}).json()["text"] == "Só texto."
+        time.sleep(0.1)
+    assert _tts(services) == []

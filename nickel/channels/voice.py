@@ -88,7 +88,9 @@ class VoiceController:
             if settings.voice_open_links and reply.links and shutil.which("xdg-open"):
                 await asyncio.create_subprocess_exec("xdg-open", reply.links[0])
             if self.services.tts is not None:
-                await self.services.speak(reply.text, source="voice")
+                error = await self.services.speak(reply.text, source="voice")  # nunca levanta
+                if error:
+                    await self._notify(f"Erro na voz: {error}")
         except Exception as exc:
             log.exception("Sessão de voz falhou")
             self.services.audit.record("voice", "error", "error", {"detail": str(exc)})

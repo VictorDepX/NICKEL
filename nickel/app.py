@@ -152,6 +152,10 @@ def create_app(
             workers.append(asyncio.create_task(announce_health()))
             yield
         finally:
+            try:  # nenhuma fala registra depois do `system/shutdown`, e nenhum player fica tocando
+                await services.shutdown_speech()
+            except Exception:
+                log.exception("falha ao parar a fala no desligamento")
             services.audit.record("system", "nickel", "shutdown")
             stop.set()
             for task in workers:
@@ -239,7 +243,8 @@ def create_app(
         speak = payload.get("speak")
         with run_scope(new_run_id()):  # a fala herda o run_id do turno (mesma execução no Monitor)
             reply = await agent.handle(Turn(channel="ui", text=text, think=think if isinstance(think, bool) else None))
-            if (speak if isinstance(speak, bool) else speak_preference()) and reply.text.strip():
+            wants = speak if isinstance(speak, bool) else speak_preference()
+            if wants and services.tts is not None and reply.text.strip():
                 spawn(services.speak(reply.text, source="ui"))  # a resposta HTTP não espera a fala
         return {"text": reply.text, "pending_action_id": reply.pending_action_id, "links": reply.links}
 

@@ -14,6 +14,7 @@ import {
   reasoningView,
   eventHint,
   num,
+  speechSignal,
   timelineKey as computeTimelineKey,
 } from "/static/monitor-core.js";
 
@@ -96,14 +97,8 @@ function setConn(live) {
   setText(pill, live ? "ao vivo" : "reconectando…");
 }
 
-let announcedPhase = null;
-
 function renderPhaseDot() {
   $("tab-monitor-dot").dataset.phase = state.phase;
-  if (state.phase !== announcedPhase) {
-    announcedPhase = state.phase;
-    window.dispatchEvent(new CustomEvent("nickel:phase", { detail: state.phase })); // app.js mostra "Parar"
-  }
 }
 
 function renderBand(phases) {
@@ -574,6 +569,8 @@ function onAudit(message) {
   const next = applyEvent(state, event, catalog);
   if (next === state) return;
   state = next;
+  const speech = speechSignal(event);
+  if (speech) window.dispatchEvent(new CustomEvent("nickel:speech", { detail: speech })); // app.js mostra/esconde "Parar"
   if (event.kind === "turn" && (event.status === "done" || event.status === "error")) scheduleRunsRefresh();
   scheduleRender();
 }
