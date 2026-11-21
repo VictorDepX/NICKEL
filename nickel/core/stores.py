@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -11,6 +14,9 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 
 from nickel.core.db import Database, dumps, iso, parse_iso, utcnow
+from nickel.core.trace import current_run_id
+
+log = logging.getLogger(__name__)
 
 MAIN_CONVERSATION = "main"
 
@@ -155,32 +161,115 @@ class PendingActionStore:
 
 
 class AuditLog:
+    """Trilha de auditoria e barramento de eventos: cada `record` grava e entrega aos assinantes."""
+
     def __init__(self, db: Database) -> None:
         self.db = db
+        self._subscribers: dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
+        self._sub_lock = threading.Lock()
 
-    def record(self, kind: str, name: str, status: str, detail: dict[str, Any] | None = None) -> None:
-        self.db.execute(
-            "INSERT INTO audit (at, kind, name, status, detail) VALUES (?, ?, ?, ?, ?)",
-            (iso(utcnow()), kind, name, status, dumps(_redact(detail or {}))),
+    def record(
+        self,
+        kind: str,
+        name: str,
+        status: str,
+        detail: dict[str, Any] | None = None,
+        *,
+        duration_ms: int | None = None,
+        run_id: str | None = None,
+        text_limit: int = 500,
+    ) -> dict[str, Any]:
+        run_id = run_id if run_id is not None else current_run_id.get()
+        clean = _redact(detail or {}, text_limit)
+        at = iso(utcnow())
+        event_id = self.db.execute(
+            "INSERT INTO audit (at, kind, name, status, detail, run_id, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (at, kind, name, status, dumps(clean), run_id, duration_ms),
         )
+        event = {
+            "id": event_id,
+            "at": at,
+            "kind": kind,
+            "name": name,
+            "status": status,
+            "detail": clean,
+            "run_id": run_id,
+            "duration_ms": duration_ms,
+        }
+        self._publish(event)
+        return event
+
+    def subscribe(self, maxsize: int = 1000) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
+        with self._sub_lock:
+            self._subscribers[queue] = asyncio.get_running_loop()
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue) -> None:
+        with self._sub_lock:
+            self._subscribers.pop(queue, None)
+
+    def has_subscribers(self) -> bool:
+        with self._sub_lock:
+            return bool(self._subscribers)
+
+    def _publish(self, event: dict[str, Any]) -> None:
+        with self._sub_lock:
+            targets = list(self._subscribers.items())
+        for queue, loop in targets:
+            try:
+                loop.call_soon_threadsafe(_offer, queue, event)
+            except Exception:  # loop fechado ou falha ao entregar: auditar nunca derruba o fluxo
+                log.debug("assinante do audit descartado", exc_info=True)
+                self.unsubscribe(queue)
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
-        rows = self.db.query("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,))
-        for row in rows:
-            row["detail"] = json.loads(row["detail"] or "{}")
-        return rows
+        return _decode(self.db.query("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,)))
+
+    def since(self, after_id: int, limit: int = 500) -> list[dict[str, Any]]:
+        return _decode(
+            self.db.query("SELECT * FROM audit WHERE id > ? ORDER BY id ASC LIMIT ?", (after_id, limit))
+        )
+
+    def run(self, run_id: str) -> list[dict[str, Any]]:
+        return _decode(self.db.query("SELECT * FROM audit WHERE run_id = ? ORDER BY id ASC", (run_id,)))
+
+    def runs(self, limit: int = 30) -> list[dict[str, Any]]:
+        return self.db.query(
+            "SELECT run_id, MIN(at) AS started_at, COUNT(*) AS events,"
+            " SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,"
+            " SUM(COALESCE(duration_ms, 0)) AS duration_ms"
+            " FROM audit WHERE run_id IS NOT NULL GROUP BY run_id ORDER BY MAX(id) DESC LIMIT ?",
+            (limit,),
+        )
+
+
+def _offer(queue: asyncio.Queue, event: dict[str, Any]) -> None:
+    """Entrega sem bloquear: com a fila cheia, descarta o item mais antigo."""
+    try:
+        if queue.full():
+            queue.get_nowait()
+        queue.put_nowait(event)
+    except Exception:
+        log.debug("falha ao entregar evento de audit", exc_info=True)
+
+
+def _decode(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for row in rows:
+        row["detail"] = json.loads(row["detail"] or "{}")
+    return rows
 
 
 _SECRET_KEYS = {"access_token", "refresh_token", "token", "password", "secret", "audio_b64", "image_b64"}
 
 
-def _redact(detail: dict[str, Any]) -> dict[str, Any]:
+def _redact(detail: dict[str, Any], limit: int = 500) -> dict[str, Any]:
     clean: dict[str, Any] = {}
     for key, value in detail.items():
         if key in _SECRET_KEYS:
             clean[key] = "***"
-        elif isinstance(value, str) and len(value) > 500:
-            clean[key] = value[:500] + "…"
+        elif isinstance(value, str) and len(value) > limit:
+            clean[key] = value[:limit] + "…"
         else:
             clean[key] = value
     return clean

@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS audit (
     kind TEXT NOT NULL,
     name TEXT NOT NULL,
     status TEXT NOT NULL,
-    detail TEXT NOT NULL DEFAULT '{}'
+    detail TEXT NOT NULL DEFAULT '{}',
+    run_id TEXT,
+    duration_ms INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS processed_inbound (
@@ -108,6 +110,16 @@ class Database:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Migrações aditivas: só ADD COLUMN / CREATE INDEX."""
+        cols = {row["name"] for row in self._conn.execute("PRAGMA table_info(audit)").fetchall()}
+        if "run_id" not in cols:
+            self._conn.execute("ALTER TABLE audit ADD COLUMN run_id TEXT")
+        if "duration_ms" not in cols:
+            self._conn.execute("ALTER TABLE audit ADD COLUMN duration_ms INTEGER")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_run ON audit(run_id)")
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
         with self._lock:
