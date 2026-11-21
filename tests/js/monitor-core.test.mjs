@@ -413,3 +413,68 @@ test("speechSignal: tts/start mostra Parar; tts/done e tts/error escondem, mesmo
   assert.equal(speechSignal(ev("turn", "done")), null);
   assert.equal(speechSignal(null), null);
 });
+
+const ttsCatalog = {
+  phases: {
+    ...catalog.phases,
+    "llm/start": "thinking",
+    "tts/start": "speaking",
+    "tts/done": "idle",
+    "tts/error": "error",
+  },
+};
+
+test("applyEvent: tts/start só vira Falando a partir de idle, error ou speaking", () => {
+  nextId = 1;
+  let s = initialState();
+  s = applyEvent(s, ev("tts", "start"), ttsCatalog);
+  assert.equal(s.phase, "speaking"); // idle → speaking
+  s = applyEvent(s, ev("tts", "start"), ttsCatalog);
+  assert.equal(s.phase, "speaking"); // speaking → speaking (fala nova substitui a anterior)
+  s = applyEvent(s, ev("turn", "error"), ttsCatalog);
+  s = applyEvent(s, ev("tts", "start"), ttsCatalog);
+  assert.equal(s.phase, "speaking"); // error → speaking
+
+  s = applyEvent(s, ev("turn", "start"), ttsCatalog);
+  s = applyEvent(s, ev("llm", "start"), ttsCatalog);
+  const since = s.since;
+  const start = ev("tts", "start", { at: "2026-11-19T10:05:00+00:00" });
+  s = applyEvent(s, start, ttsCatalog);
+  assert.equal(s.phase, "thinking"); // o próximo turno já começou: a fase não volta para Falando
+  assert.equal(s.since, since);
+  assert.equal(s.timeline[s.timeline.length - 1], start); // mas o evento entra na linha do tempo
+});
+
+test("applyEvent: tts/done e tts/error só mudam a fase quando ela é Falando", () => {
+  nextId = 1;
+  let s = initialState();
+  s = applyEvent(s, ev("tts", "start"), ttsCatalog);
+  s = applyEvent(s, ev("tts", "done"), ttsCatalog);
+  assert.equal(s.phase, "idle");
+  s = applyEvent(s, ev("tts", "start"), ttsCatalog);
+  s = applyEvent(s, ev("tts", "error"), ttsCatalog);
+  assert.equal(s.phase, "error");
+
+  s = applyEvent(s, ev("turn", "start"), ttsCatalog);
+  s = applyEvent(s, ev("llm", "start"), ttsCatalog);
+  const done = ev("tts", "done", { detail: { chars: 3, interrupted: true } });
+  s = applyEvent(s, done, ttsCatalog);
+  assert.equal(s.phase, "thinking"); // a fala que terminou no meio do turno não marca Ocioso
+  s = applyEvent(s, ev("tts", "error", { detail: { detail: "voz ocupada" } }), ttsCatalog);
+  assert.equal(s.phase, "thinking"); // nem Erro
+  assert.ok(s.timeline.includes(done));
+
+  s = applyEvent(initialState(), ev("tts", "error", { detail: { detail: "voz indisponível" } }), ttsCatalog);
+  assert.equal(s.phase, "idle"); // tts/error sem fala ativa (voz desligada) não vira Erro
+});
+
+test("eventHint resume os eventos de fala", () => {
+  assert.equal(
+    eventHint(ev("tts", "start", { detail: { provider: "voicestudio", voice: "marina", chars: 42 } })),
+    "voicestudio · marina · 42 caracteres",
+  );
+  assert.equal(eventHint(ev("tts", "start", { detail: { provider: "piper", voice: "", chars: 1200 } })), "piper · 1.200 caracteres");
+  assert.equal(eventHint(ev("tts", "done", { detail: { chars: 42 } })), "42 caracteres");
+  assert.equal(eventHint(ev("tts", "done", { detail: { chars: 42, interrupted: true } })), "42 caracteres · interrompida");
+  assert.equal(eventHint(ev("tts", "error", { detail: { source: "ui", detail: "voz ocupada" } })), "voz ocupada");
+});

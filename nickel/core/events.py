@@ -70,6 +70,8 @@ PHASES: dict[tuple[str, str], str] = {
     ("voice", "listening"): "listening",
     ("voice", "speaking"): "speaking",
     ("voice", "idle"): "idle",
+    # A UI só aplica estas três se a fase permite (monitor-core.js `ttsMayChangePhase`):
+    # a fala roda em segundo plano e pode cruzar o turno seguinte.
     ("tts", "start"): "speaking",
     ("tts", "done"): "idle",
     ("tts", "error"): "error",

@@ -133,6 +133,18 @@ export function speechSignal(event) {
   return null;
 }
 
+// A fala roda em segundo plano e pode cruzar o turno seguinte: tts/start só assume a fase
+// quando nada mais está em curso (idle, error ou outra fala), e tts/done/error só a devolvem
+// quando ela ainda é "speaking". Fora disso o evento vai só para a linha do tempo.
+const TTS_START_FROM = new Set(["idle", "error", "speaking"]);
+
+function ttsMayChangePhase(event, current) {
+  if (event.kind !== "tts") return true;
+  if (event.status === "start") return TTS_START_FROM.has(current);
+  if (event.status === "done" || event.status === "error") return current === "speaking";
+  return true;
+}
+
 export function applyEvent(state, event, catalog) {
   if (!event || typeof event.id !== "number" || event.id <= state.lastId) return state;
 
@@ -144,7 +156,7 @@ export function applyEvent(state, event, catalog) {
   const next = { ...state, lastId: event.id, timeline, runs };
 
   const phase = ((catalog && catalog.phases) || {})[`${event.kind}/${event.status}`];
-  if (phase && phase !== state.phase) {
+  if (phase && phase !== state.phase && ttsMayChangePhase(event, state.phase)) {
     next.phase = phase;
     next.since = event.at;
   }
@@ -332,6 +344,9 @@ export function eventHint(e) {
     case "tool/ok":
     case "tool/error": return d.summary || d.detail || "";
     case "turn/done": return [d.steps != null && `${d.steps} passos`, d.reply_chars != null && `${num(d.reply_chars)} caracteres`].filter(Boolean).join(" · ");
+    case "tts/start": return [d.provider, d.voice, d.chars != null && `${num(d.chars)} caracteres`].filter(Boolean).join(" · ");
+    case "tts/done": return [d.chars != null && `${num(d.chars)} caracteres`, d.interrupted && "interrompida"].filter(Boolean).join(" · ");
+    case "tts/error": return d.detail || "";
     default: return d.detail || "";
   }
 }
