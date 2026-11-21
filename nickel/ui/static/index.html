@@ -15,6 +15,12 @@
       <button type="button" role="tab" id="tab-monitor" data-tab="monitor" aria-controls="monitor" aria-selected="false" tabindex="-1">Monitor<span class="tab-dot" id="tab-monitor-dot" data-phase="idle" aria-hidden="true"></span></button>
     </nav>
     <ul class="status" id="status" aria-label="Estado dos serviços"></ul>
+    <div class="speech-controls">
+      <label class="speak-toggle" title="Lê em voz alta as respostas do chat. A escolha fica guardada no servidor.">
+        <input type="checkbox" id="speak"> Falar respostas
+      </label>
+      <button type="button" id="stop-speech" class="danger" hidden>Parar</button>
+    </div>
   </header>
 
   <main class="layout" id="conversa" role="tabpanel" aria-labelledby="tab-conversa">

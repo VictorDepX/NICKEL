@@ -96,8 +96,14 @@ function setConn(live) {
   setText(pill, live ? "ao vivo" : "reconectando…");
 }
 
+let announcedPhase = null;
+
 function renderPhaseDot() {
   $("tab-monitor-dot").dataset.phase = state.phase;
+  if (state.phase !== announcedPhase) {
+    announcedPhase = state.phase;
+    window.dispatchEvent(new CustomEvent("nickel:phase", { detail: state.phase })); // app.js mostra "Parar"
+  }
 }
 
 function renderBand(phases) {

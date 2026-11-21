@@ -51,7 +51,7 @@ class VoiceController:
             self._stop.set()
             return "processing"
         if self.state == "speaking" and self.services.tts is not None:
-            self.services.tts.stop()
+            self.services.stop_speaking()
             return "stopped"
         return self.state
 
@@ -88,7 +88,7 @@ class VoiceController:
             if settings.voice_open_links and reply.links and shutil.which("xdg-open"):
                 await asyncio.create_subprocess_exec("xdg-open", reply.links[0])
             if self.services.tts is not None:
-                await self.services.tts.speak(reply.text)
+                await self.services.speak(reply.text, source="voice")
         except Exception as exc:
             log.exception("Sessão de voz falhou")
             self.services.audit.record("voice", "error", "error", {"detail": str(exc)})

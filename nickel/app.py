@@ -21,6 +21,7 @@ from nickel.config import Settings, load_settings
 from nickel.core.agent import Agent, Turn
 from nickel.core.events import CATALOG, PHASE_LABELS, PHASES
 from nickel.core.report import render_run_report
+from nickel.core.trace import new_run_id, run_scope
 from nickel.core.skills import ToolRegistry
 from nickel.services import Services, build_services
 from nickel.skills import build_registry
@@ -33,6 +34,7 @@ SSE_PING = 15.0  # segundos entre comentários `: ping`
 SSE_POLL = 1.0  # segundos entre checagens de desconexão
 SSE_REPLAY = 100  # eventos reprisados quando `after` é omitido
 SSE_PAGE = 500  # tamanho do lote ao paginar `since`
+SPEAK_KEY = "ui.speak"  # StateStore: "1" fala as respostas do chat da GUI
 # Ligado por `nickel serve` no Ctrl+C: os streams SSE abertos (aba do Monitor) encerram em até SSE_POLL,
 # antes de o uvicorn esgotar `timeout_graceful_shutdown` e cancelar a conexão à força.
 SHUTDOWN = threading.Event()
@@ -224,14 +226,48 @@ def create_app(
             raise HTTPException(404, "Workspace inexistente.")
         return {"active": selected.id, "name": selected.name}
 
+    def speak_preference() -> bool:
+        """Preferência "Falar respostas" da GUI, guardada no StateStore (padrão: desligada)."""
+        return services.state is not None and services.state.get(SPEAK_KEY) == "1"
+
     @app.post("/api/chat")
     async def chat(payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise HTTPException(400, "Mensagem vazia.")
         think = payload.get("think")
-        reply = await agent.handle(Turn(channel="ui", text=text, think=think if isinstance(think, bool) else None))
+        speak = payload.get("speak")
+        with run_scope(new_run_id()):  # a fala herda o run_id do turno (mesma execução no Monitor)
+            reply = await agent.handle(Turn(channel="ui", text=text, think=think if isinstance(think, bool) else None))
+            if (speak if isinstance(speak, bool) else speak_preference()) and reply.text.strip():
+                spawn(services.speak(reply.text, source="ui"))  # a resposta HTTP não espera a fala
         return {"text": reply.text, "pending_action_id": reply.pending_action_id, "links": reply.links}
+
+    # ------------------------------------------------------------------ Preferências e fala
+    @app.get("/api/preferences")
+    async def get_preferences() -> dict[str, bool]:
+        return {"speak": speak_preference()}
+
+    @app.post("/api/preferences")
+    async def set_preferences(payload: dict[str, Any]) -> dict[str, bool]:
+        speak = payload.get("speak")
+        if not isinstance(speak, bool):
+            raise HTTPException(400, "Informe `speak` como verdadeiro ou falso.")
+        services.state.set(SPEAK_KEY, "1" if speak else "0")
+        return {"speak": speak}
+
+    @app.post("/api/tts/speak", status_code=202)
+    async def tts_speak(payload: dict[str, Any]) -> dict[str, bool]:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "Texto vazio: informe o que falar.")
+        spawn(services.speak(text, source="ui"))
+        return {"accepted": True}
+
+    @app.post("/api/tts/stop")
+    async def tts_stop() -> dict[str, bool]:
+        services.stop_speaking()
+        return {"stopped": True}
 
     @app.get("/api/pending")
     async def pending() -> list[dict[str, Any]]:

@@ -55,6 +55,7 @@ class Services:
     reminders: Any = None
     tts_provider: str | None = None  # "voicestudio" | "piper" | None (preenchido por build_services)
     _tts_cache: tuple[float, dict[str, Any]] | None = field(default=None, init=False, repr=False)
+    _speech: asyncio.Task | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def core(cls, settings: Settings, llm: LLMClient, db: Database | None = None) -> "Services":
@@ -97,6 +98,61 @@ class Services:
             result = {"ok": False, "detail": str(exc) or type(exc).__name__}
         self._tts_cache = (now, result)
         return {"provider": provider, **result}
+
+    async def speak(self, text: str, *, source: str) -> None:
+        """Fala `text` com auditoria (`tts/start` → `tts/done` | `tts/error`). Nunca levanta.
+
+        Uma fala nova interrompe a anterior e espera ela registrar o fim, para a fase não
+        voltar a "Ocioso" no meio da nova. A síntese roda numa tarefa própria: cancelá-la
+        (`stop_speaking`) não derruba quem chamou (ex.: a sessão de voz).
+        """
+        if self.tts is None:
+            self.audit.record("tts", "tts", "error", {"source": source, "detail": "voz indisponível"})
+            return
+        self.tts.stop()
+        previous = self._speech
+        if previous is not None and not previous.done():
+            previous.cancel()
+            await asyncio.wait({previous})
+        task = asyncio.create_task(self._speak_now(text, source))
+        self._speech = task
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+
+    async def _speak_now(self, text: str, source: str) -> None:
+        provider = self.tts_provider or resolve_tts_provider(self.settings) or "tts"
+        if provider == "voicestudio":
+            voice = self.settings.voicestudio_voice
+        else:
+            voice = self.settings.tts_voice_path.name if self.settings.tts_voice_path else ""
+        chars = len(text)
+        # Registrado antes da síntese: no VoiceStudio ela pode levar minutos, e a fase já é "Falando".
+        self.audit.record("tts", provider, "start", {"source": source, "chars": chars, "provider": provider, "voice": voice})
+        started = time.monotonic()
+
+        def elapsed() -> int:
+            return int((time.monotonic() - started) * 1000)
+
+        try:
+            await self.tts.speak(text)
+        except asyncio.CancelledError:
+            self.audit.record("tts", provider, "done", {"chars": chars, "interrupted": True}, duration_ms=elapsed())
+        except Exception as exc:
+            self.audit.record(
+                "tts", provider, "error", {"source": source, "detail": str(exc) or type(exc).__name__}, duration_ms=elapsed()
+            )
+        else:
+            self.audit.record("tts", provider, "done", {"chars": chars}, duration_ms=elapsed())
+
+    def stop_speaking(self) -> None:
+        """Para a reprodução e cancela a síntese em curso (que registra `tts/done` interrompido)."""
+        if self.tts is not None:
+            self.tts.stop()
+        if self._speech is not None and not self._speech.done():
+            self._speech.cancel()
 
     def llm_for(self, workspace: Workspace | None) -> LLMClient:
         """Backend do workspace. Sem `llm_cloud` configurado, `backend: cloud` cai no modelo local."""

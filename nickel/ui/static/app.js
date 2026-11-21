@@ -62,6 +62,33 @@ function li(html, className = "") {
   return item;
 }
 
+// ------------------------------------------------------------ fala
+// "Parar" aparece enquanto a fase é "speaking": o monitor.js já acompanha a fase ao vivo (SSE) e avisa
+// com "nickel:phase". Ao clicar em "Ouvir", o botão aparece na hora, sem esperar o evento `tts/start`.
+function showStop(visible) {
+  $("stop-speech").hidden = !visible;
+}
+
+async function speakText(text) {
+  showStop(true);
+  try {
+    await api("/api/tts/speak", { method: "POST", body: JSON.stringify({ text }) });
+  } catch (error) {
+    showStop(false);
+    alert(`Falha ao falar: ${error.message}`);
+  }
+}
+
+function listenButton(text) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "listen";
+  button.textContent = "Ouvir";
+  button.title = "Ouça esta resposta em voz alta";
+  button.addEventListener("click", () => speakText(text));
+  return button;
+}
+
 function renderMessages(messages) {
   const list = $("messages");
   const newest = messages.length ? messages[messages.length - 1].id : null;
@@ -78,14 +105,14 @@ function renderMessages(messages) {
     const toolLine = tools.length
       ? `<div class="tools">${tools.map((t) => `${t.ok ? "✓" : "✗"} ${escapeHtml(t.name)}`).join(" · ")}</div>`
       : "";
-    list.append(
-      li(
-        `<div class="bubble">${media.length ? escapeHtml(media.join(" ")) + " " : ""}${linkify(message.content)}</div>
-         ${toolLine}
-         <div class="meta"><span class="tag">${escapeHtml(CHANNELS[message.channel] || message.channel)}</span><span>${formatTime(message.created_at)}</span></div>`,
-        `msg ${role}`,
-      ),
+    const item = li(
+      `<div class="bubble">${media.length ? escapeHtml(media.join(" ")) + " " : ""}${linkify(message.content)}</div>
+       ${toolLine}
+       <div class="meta"><span class="tag">${escapeHtml(CHANNELS[message.channel] || message.channel)}</span><span>${formatTime(message.created_at)}</span></div>`,
+      `msg ${role}`,
     );
+    if (role === "assistant" && message.content.trim()) item.querySelector(".meta").append(listenButton(message.content));
+    list.append(item);
   }
   lastMessageId = newest;
   if (nearBottom || !lastMessageId) list.scrollTop = list.scrollHeight;
@@ -238,6 +265,23 @@ $("input").addEventListener("keydown", (event) => {
 });
 
 $("audit-panel").addEventListener("toggle", refresh);
+
+// "Falar respostas" fica no servidor (`ui.speak`): o /api/chat usa a preferência guardada.
+api("/api/preferences").then((prefs) => { $("speak").checked = prefs.speak === true; }).catch(() => {});
+$("speak").addEventListener("change", async (event) => {
+  const speak = event.target.checked;
+  try {
+    await api("/api/preferences", { method: "POST", body: JSON.stringify({ speak }) });
+  } catch (error) {
+    event.target.checked = !speak;
+    alert(`Falha ao salvar a preferência: ${error.message}`);
+  }
+});
+$("stop-speech").addEventListener("click", () => {
+  showStop(false);
+  api("/api/tts/stop", { method: "POST" }).catch((error) => alert(`Falha ao parar: ${error.message}`));
+});
+window.addEventListener("nickel:phase", (event) => showStop(event.detail === "speaking"));
 
 $("think").checked = thinkChoice() === true; // até /api/state trazer think_default
 $("think").addEventListener("change", (event) => storageSet(THINK_KEY, event.target.checked ? "1" : "0"));

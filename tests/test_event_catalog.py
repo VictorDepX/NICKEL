@@ -169,6 +169,15 @@ def test_every_recorded_detail_key_is_in_the_catalog(services, settings):
     services.llm = StreamingFakeLLM([say("Olá!"), say("Recebido.")], deltas=deltas)
     run(_voice(services, services.llm, tts=FakeTTS())._session())
     run(_voice(services, services.llm, stt=FakeSTT(fail=True))._session())
+    run(services.speak("sem voz configurada", source="ui"))  # tts/error: voz indisponível
+
+    class BrokenTTS(FakeTTS):
+        async def speak(self, text: str) -> None:
+            raise RuntimeError("síntese falhou")
+
+    services.tts = BrokenTTS()
+    run(services.speak("vai falhar", source="ui"))  # tts/error vindo do speaker
+    services.tts = None
     whatsapp = WhatsAppChannel(services, Agent(services, _coverage_registry()))
     run(whatsapp.handle_inbound({"id": "w1", "type": "chat", "body": "oi"}))
 
@@ -198,6 +207,7 @@ def test_every_recorded_detail_key_is_in_the_catalog(services, settings):
         ("confirmation", "cancelled"), ("confirmation", "dropped"),
         ("voice", "thinking"), ("voice", "error"), ("whatsapp", "replied"), ("whatsapp", "error"),
         ("outbound", "ok"), ("system", "startup"), ("system", "health"), ("system", "shutdown"),
+        ("tts", "start"), ("tts", "done"), ("tts", "error"),
     ]:
         assert expected in seen, expected
     assert any(e["name"] == "<fake>" for e in events)
