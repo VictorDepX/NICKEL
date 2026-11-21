@@ -265,3 +265,47 @@ def test_parses_real_llamacpp_stream_cut_by_length(settings):
     reply, _ = _real("llamacpp-stream.sse", settings)
     assert reply.reasoning and reply.content == ""
     assert reply.usage["completion_tokens"] == 400
+
+
+def test_openai_stream_strips_literal_think_tags_from_reasoning(settings):
+    def handler(request):
+        return httpx.Response(200, content=sse(delta(reasoning_content="<think>\n"), delta(content="Feito."), "[DONE]"))
+
+    got, on_delta = collect()
+    reply = run(oai(settings, handler).chat(MSGS, on_delta=on_delta))
+    assert reply.reasoning == "\n"
+    assert "<think>" not in "".join(t for _, t in got)
+    assert reply.content == "Feito."
+
+
+def test_reasoning_tags_split_across_chunks_are_stripped(settings):
+    def handler(request):
+        return httpx.Response(
+            200,
+            content=sse(
+                delta(reasoning_content="<thi"),
+                delta(reasoning_content="nk>Vou ver a < hora</th"),
+                delta(reasoning_content="ink>"),
+                delta(content="Ok"),
+                "[DONE]",
+            ),
+        )
+
+    got, on_delta = collect()
+    reply = run(oai(settings, handler).chat(MSGS, on_delta=on_delta))
+    assert reply.reasoning == "Vou ver a < hora"
+    assert "".join(t for c, t in got if c == "reasoning") == "Vou ver a < hora"
+    assert [c for c, _ in got][-1] == "content"
+
+
+def test_ollama_thinking_tags_are_stripped(settings):
+    lines = [
+        {"message": {"role": "assistant", "thinking": "<think>\n"}, "done": False},
+        {"message": {"role": "assistant", "content": "Oi"}, "done": True},
+    ]
+    body = ("\n".join(json.dumps(x) for x in lines) + "\n").encode()
+    got, on_delta = collect()
+    client = OllamaClient(settings, transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)))
+    reply = run(client.chat(MSGS, on_delta=on_delta))
+    assert "<think>" not in reply.reasoning
+    assert all("<think>" not in t for _, t in got)

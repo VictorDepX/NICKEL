@@ -75,11 +75,12 @@
     <div class="monitor-grid">
       <section class="panel reasoning" id="reasoning" data-active="false" aria-labelledby="reasoning-title">
         <h2 id="reasoning-title">Raciocínio</h2>
+        <div class="step-chips" id="reasoning-steps" role="group" aria-label="Passos com raciocínio" hidden></div>
         <p class="headline" id="reasoning-headline"></p>
         <dl class="facts" id="reasoning-facts"></dl>
         <pre class="tail" id="reasoning-tail" tabindex="0" aria-label="Trecho final do raciocínio"></pre>
         <div class="reasoning-empty" id="reasoning-empty">
-          <p>Sem raciocínio expandido (think desligado)</p>
+          <p id="reasoning-empty-text">Nenhum turno ainda.</p>
           <ol class="phase-list" id="reasoning-phases" aria-label="Fases do turno"></ol>
         </div>
         <details class="reasoning-full" id="reasoning-full" hidden>

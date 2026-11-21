@@ -165,6 +165,37 @@ class ThinkSplitter:
         return [("reasoning" if self._inside else "content", rest)]
 
 
+class ThinkTagStripper:
+    """Remove `<think>`/`</think>` literais do raciocínio, mesmo partidos entre chunks.
+
+    Alguns templates (ex.: Qwen no llama-server) mandam a própria tag dentro de
+    `reasoning_content`; ela não é raciocínio e não deve chegar ao painel.
+    """
+
+    _TAGS = ("<think>", "</think>")
+
+    def __init__(self) -> None:
+        self._buffer = ""
+
+    def feed(self, chunk: str) -> str:
+        text = self._buffer + chunk
+        for tag in self._TAGS:
+            text = re.sub(re.escape(tag), "", text, flags=re.IGNORECASE)
+        keep = 0
+        lowered = text.lower()
+        for size in range(min(len("</think>") - 1, len(text)), 0, -1):
+            tail = lowered[-size:]
+            if any(tag.startswith(tail) for tag in self._TAGS):
+                keep = size
+                break
+        self._buffer = text[len(text) - keep :] if keep else ""
+        return text[: len(text) - keep]
+
+    def flush(self) -> str:
+        rest, self._buffer = self._buffer, ""
+        return rest
+
+
 class _StreamState:
     """Acumula os pedaços de um streaming e avisa o `on_delta` a cada um."""
 
@@ -174,6 +205,7 @@ class _StreamState:
         self.content: list[str] = []
         self.dedicated_reasoning = False
         self.splitter = ThinkSplitter()
+        self.stripper = ThinkTagStripper()
 
     def _emit(self, channel: str, text: str) -> None:
         if not text:
@@ -183,16 +215,18 @@ class _StreamState:
 
     def add_reasoning(self, text: str) -> None:
         self.dedicated_reasoning = True
-        self._emit("reasoning", text)
+        self._emit("reasoning", self.stripper.feed(text))
 
     def add_content(self, text: str) -> None:
         if self.dedicated_reasoning:
+            self._emit("reasoning", self.stripper.flush())
             self._emit("content", text)
         else:
             for channel, part in self.splitter.feed(text):
                 self._emit(channel, part)
 
     def finish(self) -> tuple[str, str]:
+        self._emit("reasoning", self.stripper.flush())
         for channel, part in self.splitter.flush():
             self._emit(channel, part)
         return "".join(self.content), "".join(self.reasoning)

@@ -6,11 +6,13 @@ import {
   applyEvent,
   groupByRun,
   formatDuration,
-  hasReasoning,
   filterTimeline,
   runSummary,
   runPhases,
   elapsedMs,
+  reasoningSteps,
+  reasoningView,
+  timelineKey as computeTimelineKey,
 } from "/static/monitor-core.js";
 
 const $ = (id) => document.getElementById(id);
@@ -126,17 +128,63 @@ function tick() {
 
 // ------------------------------------------------------------ raciocínio
 
+const REASONING_EMPTY = {
+  empty: "Nenhum turno ainda.",
+  waiting: "Aguardando o modelo…",
+  off: "Sem raciocínio expandido (think desligado)",
+  none: "Sem raciocínio neste turno.",
+};
+let selectedStep = null;
+let selectedRun = null;
+
+function renderStepChips(steps, shown) {
+  const box = $("reasoning-steps");
+  box.hidden = steps.length < 2;
+  const key = `${steps.map((s) => s.step).join(",")}|${shown}`;
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.replaceChildren(
+    ...steps.map((s) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "chip",
+          "aria-pressed": String(s.step === shown),
+          onclick: () => {
+            const latest = steps[steps.length - 1].step;
+            selectedStep = s.step === latest ? null : s.step;
+            scheduleRender();
+          },
+        },
+        `passo ${s.step}`,
+      ),
+    ),
+  );
+}
+
 function renderReasoning(phases) {
-  const r = state.reasoning;
-  const has = hasReasoning(r);
+  if (state.runId !== selectedRun) {
+    selectedRun = state.runId;
+    selectedStep = null;
+  }
+  const steps = reasoningSteps(state);
+  const view = reasoningView(state);
+  const has = view === "reasoning";
+  const picked = steps.find((s) => s.step === selectedStep);
+  const r = picked || state.reasoning;
+  const shown = picked ? picked.step : steps.length ? steps[steps.length - 1].step : null;
+  renderStepChips(steps, shown);
+
   const panel = $("reasoning");
-  panel.dataset.active = String(Boolean(r.active));
-  panel.dataset.has = String(has);
+  panel.dataset.active = String(Boolean(has && r.active));
+  panel.dataset.view = view;
 
   setText($("reasoning-headline"), has ? r.headline || "" : "");
   const llm = state.lastLlm || {};
   setFacts($("reasoning-facts"), has
     ? [
+      ["Passo", steps.length > 1 ? String(shown) : null],
       ["Estado", r.active ? "pensando…" : "concluído"],
       ["Caracteres", num(r.chars)],
       ["Tokens estimados", num(r.tokens)],
@@ -146,22 +194,25 @@ function renderReasoning(phases) {
 
   const tail = $("reasoning-tail");
   tail.hidden = !has;
-  const text = r.active ? r.tail : r.tail || (r.final || "").slice(-600);
+  const text = has ? (r.active ? r.tail : r.tail || (r.final || "").slice(-600)) : "";
   if (tail.textContent !== text) {
+    // Só acompanha o fim se o usuário já estava perto dele (não puxa quem está lendo acima).
+    const nearBottom = tail.scrollHeight - tail.scrollTop - tail.clientHeight < 24;
     tail.textContent = text;
-    tail.scrollTop = tail.scrollHeight;
+    if (nearBottom) tail.scrollTop = tail.scrollHeight;
   }
 
   $("reasoning-empty").hidden = has;
   if (!has) {
+    setText($("reasoning-empty-text"), REASONING_EMPTY[view] || "");
     $("reasoning-phases").replaceChildren(
       ...phases.map((p) => h("li", { dataset: { phase: p.phase } }, label(p.phase), p.ms != null ? h("span", { class: "ms" }, formatDuration(p.ms)) : null)),
     );
   }
 
   const full = $("reasoning-full");
-  full.hidden = !r.final;
-  setText($("reasoning-full-text"), r.final || "");
+  full.hidden = !has || !r.final;
+  setText($("reasoning-full-text"), has ? r.final || "" : "");
 }
 
 // ------------------------------------------------------------ resumo do turno
@@ -280,6 +331,11 @@ function eventItem(e) {
       open: openEvents.has(e.id),
       ontoggle: (event) => {
         const el = event.currentTarget;
+        if (!el.isConnected) {
+          if (el.open) openEvents.add(e.id);
+          else openEvents.delete(e.id);
+          return forceTimeline();
+        }
         if (el.open) {
           openEvents.add(e.id);
           if (!el.querySelector("pre")) el.append(detailBlock(e));
@@ -312,64 +368,135 @@ function detailBlock(e) {
   return h("pre", { class: "json" }, json);
 }
 
-function renderTimeline() {
+// A linha do tempo cresce por anexação: grupos e itens já desenhados não são recriados,
+// então cliques, seleção de texto e <details> abertos sobrevivem aos eventos ao vivo.
+// Reconstrução completa só quando muda a estrutura (filtro ou execução nova) e nunca
+// com o ponteiro pressionado ou com texto selecionado dentro da linha do tempo.
+const groupRefs = new Map();
+let structureKey = null;
+let pointerDown = false;
+
+function timelineFilter() {
   const kinds = hiddenKinds.size ? new Set(knownKinds().filter((k) => !hiddenKinds.has(k))) : null;
-  const events = filterTimeline(state.timeline, { kinds, onlyErrors });
-  const groups = groupByRun(events).slice(0, GROUPS_SHOWN);
+  return { kinds, onlyErrors };
+}
+
+function timelineBusy() {
+  if (pointerDown) return true;
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  const container = $("timeline-groups");
+  return container.contains(selection.anchorNode) || container.contains(selection.focusNode);
+}
+
+function forceTimeline() {
+  structureKey = null;
+  timelineKey = "";
+  scheduleRender();
+}
+
+function setGroupMeta(ref) {
+  const g = ref.group;
+  ref.el.dataset.errors = String(g.errors > 0);
+  setText(ref.countEl, `${g.events.length} eventos`);
+  setText(ref.errorsEl, g.errors ? `${g.errors} ${g.errors === 1 ? "erro" : "erros"}` : "");
+  ref.errorsEl.hidden = !g.errors;
+  setText(ref.durationEl, g.durationMs ? formatDuration(g.durationMs) : "");
+}
+
+function appendEvents(ref) {
+  const fresh = ref.group.events.filter((e) => e.id > ref.lastId);
+  if (fresh.length) {
+    ref.list.append(...fresh.slice(-EVENTS_PER_GROUP).map(eventItem));
+    ref.lastId = fresh[fresh.length - 1].id;
+  }
+  while (ref.list.children.length > EVENTS_PER_GROUP) ref.list.firstElementChild.remove();
+  const total = ref.group.events.length;
+  ref.note.hidden = total <= ref.list.children.length;
+  setText(ref.note, ref.note.hidden ? "" : `Mostrando os últimos ${ref.list.children.length} de ${total}.`);
+}
+
+function fillGroup(ref) {
+  if (!ref.list) {
+    ref.note = h("p", { class: "hint", hidden: true });
+    ref.list = h("ol", { class: "events" });
+    ref.el.append(ref.note, ref.list);
+  }
+  appendEvents(ref);
+}
+
+function buildGroup(g, index) {
+  const key = g.runId ?? "";
+  const open = runChoice.has(key) ? runChoice.get(key) : index === 0;
+  const ref = { group: g, list: null, note: null, lastId: 0 };
+  ref.countEl = h("span", { class: "hint" });
+  ref.errorsEl = h("span", { class: "errors" });
+  ref.durationEl = h("span", { class: "ms" });
+  ref.el = h(
+    "details",
+    {
+      class: "run-group",
+      dataset: { runKey: key },
+      open,
+      ontoggle: (event) => {
+        const el = event.currentTarget;
+        if (el.open !== open) runChoice.set(key, el.open);
+        if (!el.isConnected) return forceTimeline();
+        if (el.open) fillGroup(ref);
+      },
+    },
+    h(
+      "summary",
+      {},
+      h("span", { class: "mono" }, g.runId ? `execução ${short(g.runId)}` : "sem execução"),
+      h("time", { datetime: g.startedAt }, clockTime(g.startedAt)),
+      ref.countEl,
+      ref.errorsEl,
+      ref.durationEl,
+    ),
+  );
+  setGroupMeta(ref);
+  if (open) fillGroup(ref);
+  groupRefs.set(key, ref);
+  return ref.el;
+}
+
+function rebuildTimeline(groups) {
   const container = $("timeline-groups");
   const focused = document.activeElement && container.contains(document.activeElement)
     ? document.activeElement.closest("[data-event-id], [data-run-key]")
     : null;
   const focusKey = focused ? focused.dataset.eventId || `run:${focused.dataset.runKey}` : null;
-
+  groupRefs.clear();
   if (!groups.length) {
     container.replaceChildren(h("p", { class: "hint" }, state.timeline.length ? "Nada com esses filtros." : "Nenhum evento ainda."));
     return;
   }
-  container.replaceChildren(
-    ...groups.map((g, index) => {
-      const key = g.runId ?? "";
-      const open = runChoice.has(key) ? runChoice.get(key) : index === 0;
-      // A lista de eventos só é montada quando o grupo está aberto (menos DOM a cada evento).
-      const fill = (el) => {
-        if (el.querySelector("ol.events")) return;
-        const shown = g.events.slice(-EVENTS_PER_GROUP);
-        if (g.events.length > shown.length) el.append(h("p", { class: "hint" }, `Mostrando os últimos ${shown.length} de ${g.events.length}.`));
-        el.append(h("ol", { class: "events" }, shown.map(eventItem)));
-      };
-      const group = h(
-        "details",
-        {
-          class: "run-group",
-          dataset: { runKey: key, errors: String(g.errors > 0) },
-          open,
-          ontoggle: (event) => {
-            const el = event.currentTarget;
-            if (el.open !== open) runChoice.set(key, el.open);
-            if (el.open) fill(el);
-          },
-        },
-        h(
-          "summary",
-          {},
-          h("span", { class: "mono" }, g.runId ? `execução ${short(g.runId)}` : "sem execução"),
-          h("time", { datetime: g.startedAt }, clockTime(g.startedAt)),
-          h("span", { class: "hint" }, `${g.events.length} eventos`),
-          g.errors ? h("span", { class: "errors" }, `${g.errors} ${g.errors === 1 ? "erro" : "erros"}`) : null,
-          g.durationMs ? h("span", { class: "ms" }, formatDuration(g.durationMs)) : null,
-        ),
-      );
-      if (open) fill(group);
-      return group;
-    }),
-  );
-
+  container.replaceChildren(...groups.map(buildGroup));
   if (focusKey) {
     const target = focusKey.startsWith("run:")
       ? container.querySelector(`[data-run-key="${CSS.escape(focusKey.slice(4))}"] > summary`)
       : container.querySelector(`[data-event-id="${CSS.escape(focusKey)}"] > summary`);
     if (target) target.focus({ preventScroll: true });
   }
+}
+
+// Devolve false quando a reconstrução foi adiada (o chamador tenta de novo).
+function renderTimeline(groups) {
+  const structure = `${filterVersion}|${groups.map((g) => g.runId ?? "").join("|")}`;
+  if (structure === structureKey && groups.length) {
+    for (const g of groups) {
+      const ref = groupRefs.get(g.runId ?? "");
+      ref.group = g;
+      setGroupMeta(ref);
+      if (ref.list) appendEvents(ref);
+    }
+    return true;
+  }
+  if (timelineBusy()) return false;
+  rebuildTimeline(groups);
+  structureKey = structure;
+  return true;
 }
 
 // ------------------------------------------------------------ execuções
@@ -429,10 +556,12 @@ function render() {
   renderReasoning(phases);
   renderSummary(events);
   renderFilters();
-  const key = `${state.lastId}:${filterVersion}`;
+  const filter = timelineFilter();
+  const key = computeTimelineKey(state.timeline, filter, filterVersion);
   if (key !== timelineKey) {
-    timelineKey = key;
-    renderTimeline();
+    const groups = groupByRun(filterTimeline(state.timeline, filter)).slice(0, GROUPS_SHOWN);
+    if (renderTimeline(groups)) timelineKey = key;
+    else setTimeout(scheduleRender, 250);
   }
 }
 
@@ -488,6 +617,10 @@ async function main() {
     filterVersion += 1;
     scheduleRender();
   });
+  $("timeline-groups").addEventListener("pointerdown", () => { pointerDown = true; });
+  const release = () => setTimeout(() => { pointerDown = false; }, 200);
+  document.addEventListener("pointerup", release);
+  document.addEventListener("pointercancel", release);
   window.addEventListener("nickel:tab", (event) => {
     if (event.detail === "monitor") {
       timelineKey = "";

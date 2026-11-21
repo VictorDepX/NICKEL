@@ -101,6 +101,14 @@
 .reasoning { transition: border-color 0.4s ease; }
 .reasoning[data-active="true"] { border-color: var(--think); }
 .reasoning .headline { margin: 0 0 8px; font-weight: 500; }
+.step-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+button.chip { background: transparent; }
+button.chip[aria-pressed="true"] { color: var(--text); background: var(--surface-2); border-color: var(--think); }
+.reasoning[data-view="waiting"] .reasoning-empty p::after {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px;
+  border-radius: 50%; background: var(--think); vertical-align: middle;
+  animation: phase-pulse 1.8s ease-in-out infinite; --phase: var(--think);
+}
 .reasoning .headline:empty { display: none; }
 
 .tail, .reasoning-full pre, .json {
@@ -198,5 +206,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .phase-band, .reasoning { transition: none; }
-  .phase-band .phase-dot, .tab-dot, .reasoning .tail::after { animation: none !important; }
+  .phase-band .phase-dot, .tab-dot, .reasoning .tail::after,
+  .reasoning .reasoning-empty p::after { animation: none !important; }
 }

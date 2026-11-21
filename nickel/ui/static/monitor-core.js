@@ -11,10 +11,83 @@ export function initialState() {
     runId: null,
     lastId: 0,
     reasoning: emptyReasoning(),
+    reasoningSteps: {},
+    llmDone: false,
     lastLlm: null,
     timeline: [],
     runs: {},
   };
+}
+
+const blank = (text) => !text || !String(text).trim();
+
+// Raciocínio por passo: um passo só com espaços (ex.: "<think>\n" de template) nunca
+// substitui nem apaga o raciocínio útil de outro passo.
+function updateStep(steps, key, detail) {
+  const step = String(detail.step ?? 0);
+  const prev = steps[step];
+  if (key === "reasoning/progress") {
+    if (blank(detail.tail)) return steps;
+    return {
+      ...steps,
+      [step]: {
+        tail: detail.tail,
+        headline: detail.headline || "",
+        chars: detail.chars || 0,
+        tokens: detail.tokens_est || 0,
+        active: true,
+      },
+    };
+  }
+  if (blank(detail.text)) return prev ? { ...steps, [step]: { ...prev, active: false } } : steps;
+  const base = prev || { tail: "", headline: "", chars: 0, tokens: 0 };
+  return {
+    ...steps,
+    [step]: {
+      ...base,
+      headline: detail.headline || base.headline,
+      chars: detail.chars || base.chars,
+      tokens: detail.tokens_est || base.tokens,
+      active: false,
+      final: detail.text,
+    },
+  };
+}
+
+function latestReasoning(steps) {
+  const list = stepList(steps);
+  if (!list.length) return emptyReasoning();
+  const { step, ...reasoning } = list[list.length - 1];
+  return reasoning;
+}
+
+function stepList(steps) {
+  return Object.entries(steps || {})
+    .map(([step, r]) => ({ step: Number(step), ...r }))
+    .filter(hasReasoning)
+    .sort((a, b) => a.step - b.step);
+}
+
+// Passos do turno atual que têm raciocínio, em ordem.
+export function reasoningSteps(state) {
+  return stepList(state.reasoningSteps);
+}
+
+// O que o painel de raciocínio deve dizer quando não há texto para mostrar.
+export function reasoningView(state) {
+  if (!state.runId) return "empty";
+  if (hasReasoning(state.reasoning)) return "reasoning";
+  if (state.llmDone) return "off";
+  if (state.phase === "idle" || state.phase === "error") return "none";
+  return "waiting";
+}
+
+// Chave da linha do tempo filtrada: muda só se aparece um evento visível ou um grupo novo.
+export function timelineKey(timeline, filter, version) {
+  const visible = filterTimeline(timeline, filter || {});
+  const last = visible.length ? visible[visible.length - 1].id : 0;
+  const runs = new Set(visible.map((e) => e.run_id ?? null)).size;
+  return `${version}:${last}:${runs}`;
 }
 
 // Mantém só as execuções que ainda aparecem na linha do tempo (aba aberta por dias).
@@ -58,24 +131,14 @@ export function applyEvent(state, event, catalog) {
   if (key === "turn/start") {
     next.runId = event.run_id || null;
     next.reasoning = emptyReasoning();
-  } else if (key === "reasoning/progress") {
-    next.reasoning = {
-      tail: detail.tail || "",
-      headline: detail.headline || "",
-      chars: detail.chars || 0,
-      tokens: detail.tokens_est || 0,
-      active: true,
-    };
-  } else if (key === "reasoning/final") {
-    next.reasoning = {
-      ...state.reasoning,
-      headline: detail.headline || state.reasoning.headline,
-      chars: detail.chars || state.reasoning.chars,
-      tokens: detail.tokens_est || state.reasoning.tokens,
-      active: false,
-      final: detail.text || "",
-    };
+    next.reasoningSteps = {};
+    next.llmDone = false;
+    next.lastLlm = null;
+  } else if (key === "reasoning/progress" || key === "reasoning/final") {
+    next.reasoningSteps = updateStep(state.reasoningSteps || {}, key, detail);
+    next.reasoning = latestReasoning(next.reasoningSteps);
   } else if (key === "llm/done") {
+    next.llmDone = true;
     next.lastLlm = {
       tokensPerSecond: detail.tokens_per_second ?? null,
       completionTokens: detail.completion_tokens ?? null,

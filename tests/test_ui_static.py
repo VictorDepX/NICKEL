@@ -36,7 +36,7 @@ def test_index_has_tabs_think_toggle_and_live_phase_label(client):
     assert ">Conversa<" in html and ">Monitor<" in html
     assert 'id="think"' in html and "Mostrar raciocínio" in html
     assert re.search(r'id="phase-label"[^>]*aria-live="polite"', html)
-    assert "Sem raciocínio expandido (think desligado)" in html
+    assert 'id="reasoning-empty-text"' in html and 'id="reasoning-steps"' in html
 
 
 def test_monitor_never_injects_html_and_uses_no_cdn():
@@ -44,6 +44,8 @@ def test_monitor_never_injects_html_and_uses_no_cdn():
     for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
         assert forbidden not in monitor, forbidden
     assert "Baixar relatório" in monitor
+    for text in ("Sem raciocínio expandido (think desligado)", "Aguardando o modelo…", "Nenhum turno ainda."):
+        assert text in monitor, text
     for name in ("index.html", "monitor.js", "monitor.css", "app.js"):
         text = (STATIC_DIR / name).read_text(encoding="utf-8")
         assert not re.search(r"(src|href)=\"https?://", text), name
@@ -57,6 +59,7 @@ def test_monitor_css_respects_reduced_motion():
 
 def test_app_sends_think_and_translates_voice_state():
     app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    assert "think: true" in app_js
+    assert 'think: $("think").checked' in app_js
+    assert "think: true" not in app_js
     assert "localStorage" in app_js
     assert "transcrevendo" in app_js

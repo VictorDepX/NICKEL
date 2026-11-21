@@ -209,8 +209,8 @@ $("composer").addEventListener("submit", async (event) => {
   button.disabled = true;
   input.value = "";
   try {
-    const payload = $("think").checked ? { text, think: true } : { text };
-    await api("/api/chat", { method: "POST", body: JSON.stringify(payload) });
+    // Marcado = pensar; desmarcado = não pensar, mesmo que o servidor tenha LLM_THINK=true.
+    await api("/api/chat", { method: "POST", body: JSON.stringify({ text, think: $("think").checked }) });
   } catch (error) {
     alert(`Falha ao enviar: ${error.message}`);
     input.value = text;

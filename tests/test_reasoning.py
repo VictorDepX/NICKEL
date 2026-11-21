@@ -88,3 +88,24 @@ def test_audit_failure_never_raises():
     t = ReasoningTracker(Boom(), step=1, clock=FakeClock())
     t.feed("reasoning", "oi")
     t.finish()
+
+
+def test_whitespace_only_reasoning_emits_no_progress_or_final():
+    audit = FakeAudit()
+    tracker = ReasoningTracker(audit, step=1, clock=FakeClock())
+    tracker.feed("reasoning", "\n")
+    tracker.feed("reasoning", "  \n\t")
+    tracker.feed("content", "Feito.")
+    tracker.finish()
+    assert audit.events == []
+
+
+def test_progress_starts_once_reasoning_has_text():
+    audit = FakeAudit()
+    tracker = ReasoningTracker(audit, step=0, clock=FakeClock())
+    tracker.feed("reasoning", "\n")
+    tracker.feed("reasoning", "Penso.")
+    tracker.finish()
+    statuses = [e[2] for e in audit.events]
+    assert statuses == ["progress", "final"]
+    assert audit.events[0][3]["chars"] == len("\nPenso.")

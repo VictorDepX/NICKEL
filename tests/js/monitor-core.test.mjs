@@ -10,6 +10,9 @@ import {
   runSummary,
   runPhases,
   elapsedMs,
+  reasoningSteps,
+  reasoningView,
+  timelineKey,
 } from "../../nickel/ui/static/monitor-core.js";
 
 const catalog = {
@@ -256,4 +259,63 @@ test("elapsedMs desde o início da fase", () => {
   assert.equal(elapsedMs("2026-11-19T10:00:00Z", Date.parse("2026-11-19T10:00:03Z")), 3000);
   assert.equal(elapsedMs("2026-11-19T10:00:05Z", Date.parse("2026-11-19T10:00:03Z")), 0);
   assert.equal(elapsedMs("lixo", 0), null);
+});
+
+test("raciocínio por passo: passo vazio não apaga o útil e a lista mostra cada passo", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+  s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 0, chars: 20, tokens_est: 5, headline: "Vou agendar", tail: "Vou agendar o lembrete" } }), catalog);
+  s = applyEvent(s, ev("reasoning", "final", { detail: { step: 0, text: "Vou agendar o lembrete.", headline: "Vou agendar o lembrete.", chars: 23, tokens_est: 6 } }), catalog);
+  s = applyEvent(s, ev("reasoning", "final", { detail: { step: 1, text: "\n", headline: "", chars: 1, tokens_est: 1 } }), catalog);
+  s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 1, chars: 2, tokens_est: 1, headline: "", tail: "  " } }), catalog);
+  assert.equal(s.reasoning.final, "Vou agendar o lembrete.");
+  assert.deepEqual(reasoningSteps(s).map((x) => x.step), [0]);
+  s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 1, chars: 9, tokens_est: 3, headline: "Confirmo", tail: "Confirmo." } }), catalog);
+  assert.equal(s.reasoning.tail, "Confirmo.");
+  assert.equal(s.reasoning.active, true);
+  assert.deepEqual(reasoningSteps(s).map((x) => x.step), [0, 1]);
+  assert.equal(reasoningSteps(s)[0].final, "Vou agendar o lembrete.");
+  s = applyEvent(s, ev("turn", "start", { run_id: "r2" }), catalog);
+  assert.deepEqual(reasoningSteps(s), []);
+});
+
+test("reasoningView: sem turno, aguardando, think desligado e com raciocínio", () => {
+  nextId = 1;
+  const cat = { phases: { ...catalog.phases, "prompt/built": "thinking", "llm/done": "answering" } };
+  let s = initialState();
+  assert.equal(reasoningView(s), "empty");
+  s = applyEvent(s, ev("turn", "start"), cat);
+  assert.equal(reasoningView(s), "waiting");
+  s = applyEvent(s, ev("prompt", "built"), cat);
+  assert.equal(s.phase, "thinking");
+  assert.equal(reasoningView(s), "waiting");
+  const off = applyEvent(s, ev("llm", "done", { detail: { step: 0 } }), cat);
+  assert.equal(reasoningView(off), "off");
+  const failed = applyEvent(s, ev("turn", "error"), cat);
+  assert.equal(reasoningView(failed), "none");
+  const thinking = applyEvent(s, ev("reasoning", "progress", { detail: { step: 0, chars: 3, tokens_est: 1, tail: "abc" } }), cat);
+  assert.equal(reasoningView(thinking), "reasoning");
+  const after = applyEvent(thinking, ev("llm", "done", { detail: { step: 0 } }), cat);
+  assert.equal(reasoningView(after), "reasoning");
+});
+
+test("turn/start zera lastLlm", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("llm", "done", { detail: { tokens_per_second: 40 } }), catalog);
+  assert.equal(s.lastLlm.tokensPerSecond, 40);
+  s = applyEvent(s, ev("turn", "start"), catalog);
+  assert.equal(s.lastLlm, null);
+});
+
+test("timelineKey só muda quando o resultado filtrado muda", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+  const noReasoning = { kinds: new Set(["turn", "tool"]) };
+  const before = timelineKey(s.timeline, noReasoning, 0);
+  s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 0, tail: "x" } }), catalog);
+  assert.equal(timelineKey(s.timeline, noReasoning, 0), before);
+  assert.notEqual(timelineKey(s.timeline, {}, 0), before);
+  assert.notEqual(timelineKey(s.timeline, noReasoning, 1), before);
+  s = applyEvent(s, ev("tool", "start"), catalog);
+  assert.notEqual(timelineKey(s.timeline, noReasoning, 0), before);
 });

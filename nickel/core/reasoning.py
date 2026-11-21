@@ -73,12 +73,19 @@ class ReasoningTracker:
         self._content_chars = 0
         self._last_emit: float | None = None
         self._summary: ReasoningSummary | None = None
+        self._seen_text = False
 
     def _record(self, status: str, detail: dict[str, Any], limit: int) -> None:
         try:
             self.audit.record("reasoning", "model", status, detail, text_limit=limit)
         except Exception:
             logger.debug("falha ao gravar evento de raciocínio", exc_info=True)
+
+    def _has_text(self) -> bool:
+        # Raciocínio só com espaços/quebras (ex.: "<think>\n" sem a tag) não vira evento.
+        if not self._seen_text:
+            self._seen_text = any(part.strip() for part in self._parts)
+        return self._seen_text
 
     def feed(self, channel: str, text: str) -> None:
         if channel != "reasoning":
@@ -89,6 +96,8 @@ class ReasoningTracker:
             return
         self._parts.append(text)
         self._chars += len(text)
+        if not self._has_text():
+            return
         now = self.clock()
         if self._last_emit is not None and now - self._last_emit < self.interval_s:
             return
@@ -115,7 +124,7 @@ class ReasoningTracker:
         full = "".join(self._parts)
         summary = summarize_reasoning(full, self.tool_names)
         self._summary = summary
-        if full:
+        if full.strip():
             self._record(
                 "final",
                 {
