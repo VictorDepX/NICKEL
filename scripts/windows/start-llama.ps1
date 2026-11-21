@@ -3,8 +3,8 @@
   Sobe o llama-server (llama.cpp, Vulkan) com o Qwen3.6-35B-A3B para o NICKEL.
 .DESCRIPTION
   O modelo é MoE: os pesos dos experts ficam na RAM e só atenção/camadas fixas ocupam a VRAM.
-  -NCpuMoe -1 (padrão) manda TODOS os experts para a RAM (--cpu-moe): é o ponto de partida seguro para 8 GB.
-  Se sobrar VRAM, reduza o valor (ex.: -NCpuMoe 30) para trazer camadas de volta à GPU e acelerar;
+  -NCpuMoe 30 (padrão) mantém na RAM os experts das 30 primeiras camadas e leva o resto para a GPU.
+  Medido numa RX 6600 8 GB + 20 GB RAM: ~21 tok/s de geração e ~190 tok/s de prefill. Use -NCpuMoe -1 (--cpu-moe) se faltar VRAM.
   se faltar VRAM ou RAM, aumente o contexto menos ou troque a quantização.
 .EXAMPLE
   .\start-llama.ps1
@@ -18,10 +18,10 @@ param(
     [int]$Ctx = 16384,
     [int]$Port = 8080,
     [string]$Alias = "qwen3.6-35b-a3b",
-    [int]$NCpuMoe = -1,
+    [int]$NCpuMoe = 30,
     [int]$Threads = 0,
     [switch]$KvQuant,
-    [switch]$NoMmap
+    [switch]$Mmap
 )
 $ErrorActionPreference = "Stop"
 
@@ -43,7 +43,8 @@ $serverArgs = @(
 if ($NCpuMoe -lt 0) { $serverArgs += "--cpu-moe" } else { $serverArgs += @("--n-cpu-moe", $NCpuMoe) }
 if ($Threads -gt 0) { $serverArgs += @("-t", $Threads) }
 if ($KvQuant) { $serverArgs += @("--cache-type-k", "q8_0", "--cache-type-v", "q8_0") }
-if ($NoMmap) { $serverArgs += "--no-mmap" }
+# Sem mmap os experts ficam residentes na RAM; com mmap o Windows pagina do disco e o prefill despenca.
+if (-not $Mmap) { $serverArgs += @("--load-mode", "none") }
 if ($Vision) {
     if (-not (Test-Path $Mmproj)) { throw "mmproj não encontrado: $Mmproj. Rode get-model.ps1 -WithVision." }
     $serverArgs += @("--mmproj", $Mmproj)

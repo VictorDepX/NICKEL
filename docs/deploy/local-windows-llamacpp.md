@@ -32,7 +32,7 @@ Grava em `%USERPROFILE%\models` o `Qwen_Qwen3.6-35B-A3B-IQ4_XS.gguf` e, com `-Wi
 .\scripts\windows\start-llama.ps1 -Vision    # com fotos
 ```
 
-Padrão seguro para 8 GB: `--cpu-moe` (todos os experts na RAM), contexto de 16k, um slot (`-np 1`) e `--jinja` (necessário para chamada de ferramentas). Espere a mensagem de que o servidor está escutando.
+Padrão medido numa RX 6600 8 GB com 20 GB de RAM: `--n-cpu-moe 30` e `--load-mode none` (experts das 30 primeiras camadas residentes na RAM, o resto na GPU; ~21 tok/s de geração, ~190 tok/s de prefill, VRAM ~7,3 GB), contexto de 16k, um slot (`-np 1`) e `--jinja` (necessário para chamada de ferramentas). Espere a mensagem de que o servidor está escutando.
 
 ## 4. Medir
 
@@ -46,10 +46,10 @@ Mostra tokens/s de prefill e de geração (prompt curto e longo) e a RAM livre a
 
 | Resultado | Ação |
 |---|---|
-| Geração abaixo de ~5 tokens/s | Confira se a GPU é usada (log do servidor deve citar Vulkan e a RX 6600); tente `-NoMmap`; reduza `-Ctx` |
+| Geração abaixo de ~5 tokens/s | Confira se a GPU é usada (log do servidor deve citar Vulkan e a RX 6600); não use `-Mmap` (com mmap o Windows pagina os experts do disco e o prefill cai para ~4 tok/s); reduza `-Ctx` |
 | RAM livre abaixo de ~2 GB | Feche o navegador, use `-Quant IQ3_M` ou `-Ctx 8192` |
 | VRAM sobrando | Reduza `-NCpuMoe` (ex.: `-NCpuMoe 30`) para trazer camadas de experts para a GPU e acelerar; repita o benchmark |
-| Falha de memória na GPU | Aumente `-NCpuMoe` ou volte para `--cpu-moe` (padrão) |
+| Falha de memória na GPU | Aumente `-NCpuMoe` (ex.: 32) ou use `-NCpuMoe -1` (`--cpu-moe`) |
 
 ## 5. Configurar o NICKEL
 
