@@ -1,6 +1,7 @@
 """API de monitoramento: SSE, execuções, relatório, catálogo e `think` no chat."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -190,3 +191,58 @@ def test_startup_survives_failing_status_and_still_records_shutdown(services):
         assert test_client.get("/api/audit").status_code == 200
     statuses = [e["status"] for e in reversed(services.audit.recent(50)) if e["kind"] == "system"]
     assert "startup" in statuses and statuses[-1] == "shutdown"
+
+
+def test_stream_replay_pages_beyond_500_events(client, services):
+    first = services.audit.record("tool", "bulk", "ok", run_id="big")["id"]
+    for _ in range(1100):
+        services.audit.record("tool", "bulk", "ok", run_id="big")
+    frames = _parse(client.get(f"/api/events/stream?once=true&after={first - 1}").text)
+    ids = [int(f["id"]) for f in frames]
+    assert len(ids) == 1101 and ids == list(range(first, first + 1101))
+
+
+def test_stream_backfills_gap_when_queue_dropped_events(app, services, monkeypatch):
+    monkeypatch.setattr(app_module, "SSE_POLL", 0.01)
+    endpoint = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/events/stream")
+    seeded = _seed(services, 2)
+
+    class FakeRequest:
+        headers = {}
+        calls = 0
+
+        async def is_disconnected(self):
+            FakeRequest.calls += 1
+            if FakeRequest.calls == 2:
+                # simula descarte: grava 3 eventos e só o último chega à fila
+                for subscriber in list(services.audit._subscribers):
+                    services.audit._subscribers.pop(subscriber)
+                    keep = subscriber
+                for i in range(2):
+                    services.audit.record("tool", f"lost{i}", "ok", run_id="g")
+                services.audit._subscribers[keep] = asyncio.get_running_loop()
+                services.audit.record("tool", "last", "ok", run_id="g")
+            return FakeRequest.calls > 8
+
+    async def scenario():
+        response = await endpoint(FakeRequest(), after=None, once=False)
+        return [c async for c in response.body_iterator]
+
+    frames = _parse("".join(c if isinstance(c, str) else c.decode() for c in run(scenario())))
+    names = [json.loads(f["data"])["name"] for f in frames if "data" in f]
+    assert names[-3:] == ["lost0", "lost1", "last"]
+    ids = [int(f["id"]) for f in frames if "id" in f]
+    assert ids == sorted(set(ids)) and ids[: len(seeded)] == seeded
+
+
+def test_run_duration_agrees_between_runs_and_report(client, services):
+    a = services.audit
+    a.record("tool", "x", "ok", run_id="d1", duration_ms=850)
+    a.record("llm", "m", "done", run_id="d1", duration_ms=3000)
+    a.record("turn", "ui", "done", run_id="d1", duration_ms=3300)
+    a.record("tool", "y", "ok", run_id="d2", duration_ms=400)
+    a.record("tool", "z", "ok", run_id="d2", duration_ms=600)
+    listed = {r["run_id"]: r["duration_ms"] for r in client.get("/api/runs").json()}
+    assert listed == {"d1": 3300, "d2": 1000}
+    assert "Duração: 3,3 s" in client.get("/api/runs/d1/report.md").text
+    assert "Duração: 1,0 s" in client.get("/api/runs/d2/report.md").text

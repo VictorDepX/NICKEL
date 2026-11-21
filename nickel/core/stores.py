@@ -237,10 +237,12 @@ class AuditLog:
 
     def runs(self, limit: int = 30) -> list[dict[str, Any]]:
         return self.db.query(
-            "SELECT run_id, MIN(at) AS started_at, COUNT(*) AS events,"
-            " SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,"
-            " SUM(COALESCE(duration_ms, 0)) AS duration_ms"
-            " FROM audit WHERE run_id IS NOT NULL GROUP BY run_id ORDER BY MAX(id) DESC LIMIT ?",
+            "SELECT a.run_id AS run_id, MIN(a.at) AS started_at, COUNT(*) AS events,"
+            " SUM(CASE WHEN a.status = 'error' THEN 1 ELSE 0 END) AS errors,"
+            " COALESCE((SELECT t.duration_ms FROM audit t WHERE t.run_id = a.run_id AND t.kind = 'turn'"
+            "  AND t.status IN ('done', 'error') AND t.duration_ms IS NOT NULL ORDER BY t.id DESC LIMIT 1),"
+            "  SUM(COALESCE(a.duration_ms, 0))) AS duration_ms"
+            " FROM audit a WHERE a.run_id IS NOT NULL GROUP BY a.run_id ORDER BY MAX(a.id) DESC LIMIT ?",
             (limit,),
         )
 

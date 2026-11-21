@@ -13,6 +13,14 @@ def fmt_ms(ms: int | float | None) -> str:
     return f"{ms / 1000:.1f}".replace(".", ",") + " s"
 
 
+def run_duration(events: list[dict[str, Any]]) -> int:
+    """Duração do run: a do `turn/done|error` quando existe; senão a soma das durações (igual a `AuditLog.runs`)."""
+    for e in sorted(events, key=lambda e: e["id"], reverse=True):
+        if e["kind"] == "turn" and e["status"] in ("done", "error") and e.get("duration_ms") is not None:
+            return int(e["duration_ms"])
+    return sum(e.get("duration_ms") or 0 for e in events)
+
+
 def _cell(value: Any) -> str:
     return str(value if value is not None else "-").replace("|", "\\|").replace("\n", " ")
 
@@ -26,9 +34,7 @@ def render_run_report(events: list[dict[str, Any]]) -> str:
         return "# Execução sem eventos\n"
     events = sorted(events, key=lambda e: e["id"])
     run_id = events[0].get("run_id") or "-"
-    total = sum(e.get("duration_ms") or 0 for e in events if e["kind"] in ("turn",)) or sum(
-        e.get("duration_ms") or 0 for e in events
-    )
+    total = run_duration(events)
     lines = [
         f"# Execução {run_id}",
         "",

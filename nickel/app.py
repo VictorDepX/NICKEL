@@ -31,6 +31,7 @@ HEALTH_TIMEOUT = 3.0  # segundos: teto da consulta de saúde no startup
 SSE_PING = 15.0  # segundos entre comentários `: ping`
 SSE_POLL = 1.0  # segundos entre checagens de desconexão
 SSE_REPLAY = 100  # eventos reprisados quando `after` é omitido
+SSE_PAGE = 500  # tamanho do lote ao paginar `since`
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -41,7 +42,7 @@ def _int_or_none(value: Any) -> int | None:
 
 
 def _frame(event: dict[str, Any]) -> str:
-    return f"id: {event['id']}\nevent: audit\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+    return f"id: {event['id']}\nevent: audit\ndata: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
 
 
 def create_app(
@@ -249,17 +250,28 @@ def create_app(
             last = _int_or_none(after)
         audit_log = services.audit
 
+        async def backfill(start: int):
+            """Eventos com id > start, em lotes até um lote curto (sem teto de 500)."""
+            while True:
+                batch = audit_log.since(start, SSE_PAGE)
+                for item in batch:
+                    yield item
+                if len(batch) < SSE_PAGE:
+                    return
+                start = batch[-1]["id"]
+
         async def generate():
             queue = audit_log.subscribe()  # antes da reprise: sem lacunas
             try:
-                if last is None:
-                    replay = list(reversed(audit_log.recent(SSE_REPLAY)))
-                else:
-                    replay = audit_log.since(last)
                 sent = last if last is not None else 0
-                for event in replay:
-                    sent = max(sent, event["id"])
-                    yield _frame(event)
+                if last is None:
+                    for event in reversed(audit_log.recent(SSE_REPLAY)):
+                        sent = max(sent, event["id"])
+                        yield _frame(event)
+                else:
+                    async for event in backfill(sent):
+                        sent = event["id"]
+                        yield _frame(event)
                 if once:
                     return
                 idle = 0.0
@@ -273,6 +285,14 @@ def create_app(
                             yield ": ping\n\n"
                         continue
                     idle = 0.0
+                    if event["id"] <= sent:
+                        continue
+                    if event["id"] > sent + 1:  # fila cheia descartou eventos: preenche a lacuna
+                        async for missing in backfill(sent):
+                            if missing["id"] >= event["id"]:
+                                break
+                            sent = missing["id"]
+                            yield _frame(missing)
                     if event["id"] > sent:
                         sent = event["id"]
                         yield _frame(event)
