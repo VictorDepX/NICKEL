@@ -31,13 +31,32 @@ class FakeLLM:
         self.replies.extend(replies)
 
     async def chat(self, messages, tools=None, options=None, on_delta=None) -> LLMReply:
-        self.calls.append({"messages": [dict(m) for m in messages], "tools": tools, "options": options})
+        self.calls.append(
+            {"messages": [dict(m) for m in messages], "tools": tools, "options": options, "on_delta": on_delta}
+        )
         if not self.replies:
             return LLMReply(content="(sem roteiro)")
         return self.replies.pop(0)
 
     async def health(self) -> dict[str, Any]:
         return {"ok": True, "model": "fake", "model_present": True}
+
+
+class StreamingFakeLLM(FakeLLM):
+    """Como o FakeLLM, mas anuncia streaming e chama `on_delta` com os deltas roteirizados."""
+
+    supports_stream = True
+
+    def __init__(self, replies: list[LLMReply] | None = None, deltas: list[tuple[str, str]] | None = None) -> None:
+        super().__init__(replies)
+        self.deltas = list(deltas or [])
+
+    async def chat(self, messages, tools=None, options=None, on_delta=None) -> LLMReply:
+        reply = await super().chat(messages, tools, options, on_delta)
+        if on_delta is not None:
+            for channel, text in self.deltas:
+                on_delta(channel, text)
+        return reply
 
 
 def say(text: str) -> LLMReply:

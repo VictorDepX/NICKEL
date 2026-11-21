@@ -123,7 +123,8 @@ def test_tool_exception_becomes_error_result(services, llm, registry):
     llm.queue(call("boom"), say("Deu erro."))
     reply = run(Agent(services, registry).handle(Turn(channel="ui", text="x")))
     assert reply.tools[0]["ok"] is False and "falha simulada" in reply.tools[0]["summary"]
-    assert services.audit.recent(5)[0]["status"] == "error"
+    tool_events = [e for e in services.audit.recent(20) if e["kind"] == "tool"]
+    assert tool_events[0]["status"] == "error"
 
 
 def test_llm_error_is_friendly(services, registry):
