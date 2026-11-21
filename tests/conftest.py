@@ -30,7 +30,7 @@ class FakeLLM:
     def queue(self, *replies: LLMReply) -> None:
         self.replies.extend(replies)
 
-    async def chat(self, messages, tools=None, options=None) -> LLMReply:
+    async def chat(self, messages, tools=None, options=None, on_delta=None) -> LLMReply:
         self.calls.append({"messages": [dict(m) for m in messages], "tools": tools, "options": options})
         if not self.replies:
             return LLMReply(content="(sem roteiro)")

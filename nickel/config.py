@@ -51,6 +51,7 @@ class Settings:
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.3
     llm_think: bool = False
+    llm_stream: bool = True
     llm_timeout_seconds: float = 180.0
     llm_retries: int = 2
     llm_keep_alive: str = "30m"
@@ -147,6 +148,7 @@ class Settings:
             llm_max_tokens=_int(env, "LLM_MAX_TOKENS", cls.llm_max_tokens),
             llm_temperature=_float(env, "LLM_TEMPERATURE", cls.llm_temperature),
             llm_think=_bool(env, "LLM_THINK", cls.llm_think),
+            llm_stream=_bool(env, "LLM_STREAM", cls.llm_stream),
             llm_timeout_seconds=_float(env, "LLM_TIMEOUT_SECONDS", cls.llm_timeout_seconds),
             llm_retries=_int(env, "LLM_RETRIES", cls.llm_retries),
             llm_keep_alive=_str(env, "LLM_KEEP_ALIVE", cls.llm_keep_alive),
