@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from nickel.channels.voice import VoiceController
 from nickel.channels.whatsapp import WhatsAppChannel, prune_media
 from nickel.config import Settings, load_settings
 from nickel.core.agent import Agent, Turn
+from nickel.core.events import CATALOG, PHASE_LABELS, PHASES
+from nickel.core.report import render_run_report
 from nickel.core.skills import ToolRegistry
 from nickel.services import Services, build_services
 from nickel.skills import build_registry
@@ -25,6 +28,20 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "ui" / "static"
 VERSION = "2.0.0"
 HEALTH_TIMEOUT = 3.0  # segundos: teto da consulta de saúde no startup
+SSE_PING = 15.0  # segundos entre comentários `: ping`
+SSE_POLL = 1.0  # segundos entre checagens de desconexão
+SSE_REPLAY = 100  # eventos reprisados quando `after` é omitido
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _frame(event: dict[str, Any]) -> str:
+    return f"id: {event['id']}\nevent: audit\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 def create_app(
@@ -96,18 +113,24 @@ def create_app(
             workers.append(asyncio.create_task(services.reminders.run(stop)))
         if background and services.stt is not None and hasattr(services.stt, "warm_up"):
             workers.append(asyncio.create_task(services.stt.warm_up()))
-        services.audit.record(
-            "system",
-            "nickel",
-            "startup",
-            {
-                "version": VERSION,
-                "llm": f"{settings.llm_provider}:{settings.llm_model}",
-                "workspace_count": len(services.workspaces.all()),
-            },
-        )
-        services.audit.record("system", "nickel", "health", await services_snapshot(HEALTH_TIMEOUT))
+        async def announce_startup() -> None:
+            services.audit.record(
+                "system",
+                "nickel",
+                "startup",
+                {
+                    "version": VERSION,
+                    "llm": f"{settings.llm_provider}:{settings.llm_model}",
+                    "workspace_count": len(services.workspaces.all()),
+                },
+            )
+            services.audit.record("system", "nickel", "health", await services_snapshot(HEALTH_TIMEOUT))
+
         try:
+            try:
+                await announce_startup()
+            except Exception:
+                log.exception("falha ao registrar os eventos de startup")
             yield
         finally:
             services.audit.record("system", "nickel", "shutdown")
@@ -186,7 +209,8 @@ def create_app(
         text = str(payload.get("text") or "").strip()
         if not text:
             raise HTTPException(400, "Mensagem vazia.")
-        reply = await agent.handle(Turn(channel="ui", text=text))
+        think = payload.get("think")
+        reply = await agent.handle(Turn(channel="ui", text=text, think=think if isinstance(think, bool) else None))
         return {"text": reply.text, "pending_action_id": reply.pending_action_id, "links": reply.links}
 
     @app.get("/api/pending")
@@ -217,6 +241,88 @@ def create_app(
     @app.get("/api/audit")
     async def audit(limit: int = 80) -> list[dict[str, Any]]:
         return services.audit.recent(min(limit, 500))
+
+    @app.get("/api/events/stream")
+    async def events_stream(request: Request, after: str | None = None, once: bool = False) -> StreamingResponse:
+        last = _int_or_none(request.headers.get("last-event-id"))
+        if last is None:
+            last = _int_or_none(after)
+        audit_log = services.audit
+
+        async def generate():
+            queue = audit_log.subscribe()  # antes da reprise: sem lacunas
+            try:
+                if last is None:
+                    replay = list(reversed(audit_log.recent(SSE_REPLAY)))
+                else:
+                    replay = audit_log.since(last)
+                sent = last if last is not None else 0
+                for event in replay:
+                    sent = max(sent, event["id"])
+                    yield _frame(event)
+                if once:
+                    return
+                idle = 0.0
+                while not await request.is_disconnected():
+                    try:
+                        event = await asyncio.wait_for(queue.get(), SSE_POLL)
+                    except asyncio.TimeoutError:
+                        idle += SSE_POLL
+                        if idle >= SSE_PING:
+                            idle = 0.0
+                            yield ": ping\n\n"
+                        continue
+                    idle = 0.0
+                    if event["id"] > sent:
+                        sent = event["id"]
+                        yield _frame(event)
+            finally:
+                audit_log.unsubscribe(queue)
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.get("/api/events/catalog")
+    async def events_catalog() -> dict[str, Any]:
+        return {
+            "kinds": {
+                kind: {
+                    "description": spec.description,
+                    "statuses": list(spec.statuses),
+                    "fields": list(spec.fields),
+                    "source": spec.source,
+                }
+                for kind, spec in CATALOG.items()
+            },
+            "phases": {f"{kind}/{status}": phase for (kind, status), phase in PHASES.items()},
+            "labels": PHASE_LABELS,
+        }
+
+    @app.get("/api/runs")
+    async def runs(limit: int = 30) -> list[dict[str, Any]]:
+        return services.audit.runs(max(1, min(limit, 200)))
+
+    @app.get("/api/runs/{run_id}")
+    async def run_detail(run_id: str) -> list[dict[str, Any]]:
+        events = services.audit.run(run_id)
+        if not events:
+            raise HTTPException(404, "Execução não encontrada.")
+        return events
+
+    @app.get("/api/runs/{run_id}/report.md")
+    async def run_report(run_id: str) -> Response:
+        events = services.audit.run(run_id)
+        if not events:
+            raise HTTPException(404, "Execução não encontrada.")
+        safe = "".join(c for c in run_id if c.isalnum() or c in "-_.")
+        return Response(
+            render_run_report(events),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="nickel-{safe}.md"'},
+        )
 
     @app.get("/api/memory")
     async def memory() -> list[dict[str, str]]:
