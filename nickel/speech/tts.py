@@ -11,9 +11,14 @@ import wave
 from pathlib import Path
 from typing import Protocol
 
+from nickel.speech import playback
+
 log = logging.getLogger(__name__)
 
-_PLAYERS = (["pw-play"], ["paplay"], ["aplay", "-q"])
+
+
+class TTSError(RuntimeError):
+    """Falha ao sintetizar ou reproduzir fala."""
 
 
 class Speaker(Protocol):
@@ -30,12 +35,49 @@ def clean_for_speech(text: str) -> str:
     return text.strip()
 
 
+_SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _cut_long(sentence: str, limit: int) -> list[str]:
+    """Corta uma frase maior que o limite no último espaço antes dele."""
+    parts: list[str] = []
+    while len(sentence) > limit:
+        cut = sentence.rfind(" ", 0, limit + 1)
+        if cut <= 0:
+            cut = limit
+        parts.append(sentence[:cut].strip())
+        sentence = sentence[cut:].strip()
+    if sentence:
+        parts.append(sentence)
+    return parts
+
+
+def split_for_tts(text: str, limit: int = 4000) -> list[str]:
+    """Limpa o texto e divide em blocos de até `limit` caracteres, em fim de frase."""
+    cleaned = clean_for_speech(text)
+    if not cleaned:
+        return []
+    chunks: list[str] = []
+    current = ""
+    for sentence in _SENTENCE_END.split(cleaned):
+        pieces = [sentence] if len(sentence) <= limit else _cut_long(sentence, limit)
+        for piece in pieces:
+            if current and len(current) + 1 + len(piece) <= limit:
+                current = f"{current} {piece}"
+            else:
+                if current:
+                    chunks.append(current)
+                current = piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 class PiperSpeaker:
     def __init__(self, voice_path: Path, work_dir: Path) -> None:
         self.voice_path = voice_path
         self.work_dir = work_dir
         self._voice = None
-        self._process: asyncio.subprocess.Process | None = None
 
     def _synthesize_sync(self, text: str, target: Path) -> None:
         if self._voice is None:
@@ -64,17 +106,10 @@ class PiperSpeaker:
             wav.unlink(missing_ok=True)
 
     async def play(self, wav: Path) -> None:
-        for player in _PLAYERS:
-            if shutil.which(player[0]):
-                self._process = await asyncio.create_subprocess_exec(*player, str(wav))
-                await self._process.wait()
-                self._process = None
-                return
-        log.warning("Nenhum player de áudio encontrado (pw-play, paplay, aplay).")
+        await playback.play_wav(wav)
 
     def stop(self) -> None:
-        if self._process and self._process.returncode is None:
-            self._process.terminate()
+        playback.stop_playback()
 
 
 async def wav_to_ogg_opus(wav: Path) -> bytes:

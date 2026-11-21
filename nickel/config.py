@@ -103,6 +103,12 @@ class Settings:
     stt_compute_type: str = "int8_float16"
     stt_language: str = "pt"
     tts_voice_path: Path | None = None
+    tts_provider: str = "auto"  # auto | voicestudio | piper | none
+    voicestudio_url: str = ""
+    voicestudio_api_key: str = ""
+    voicestudio_model: str = "omnivoice"
+    voicestudio_voice: str = "default"
+    voicestudio_timeout_seconds: float = 120.0  # a primeira chamada carrega o modelo
     voice_max_seconds: int = 30
     voice_silence_seconds: float = 1.5
     voice_notify: bool = True
@@ -184,6 +190,14 @@ class Settings:
             stt_compute_type=_str(env, "STT_COMPUTE_TYPE", cls.stt_compute_type),
             stt_language=_str(env, "STT_LANGUAGE", cls.stt_language),
             tts_voice_path=Path(voice).expanduser() if voice else None,
+            tts_provider=_str(env, "TTS_PROVIDER", cls.tts_provider).lower(),
+            voicestudio_url=_str(env, "VOICESTUDIO_URL", cls.voicestudio_url),
+            voicestudio_api_key=_str(env, "VOICESTUDIO_API_KEY", cls.voicestudio_api_key),
+            voicestudio_model=_str(env, "VOICESTUDIO_MODEL", cls.voicestudio_model),
+            voicestudio_voice=_str(env, "VOICESTUDIO_VOICE", cls.voicestudio_voice),
+            voicestudio_timeout_seconds=_float(
+                env, "VOICESTUDIO_TIMEOUT_SECONDS", cls.voicestudio_timeout_seconds
+            ),
             voice_max_seconds=_int(env, "VOICE_MAX_SECONDS", cls.voice_max_seconds),
             voice_silence_seconds=_float(env, "VOICE_SILENCE_SECONDS", cls.voice_silence_seconds),
             voice_notify=_bool(env, "VOICE_NOTIFY", cls.voice_notify),
