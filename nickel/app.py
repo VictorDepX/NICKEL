@@ -88,9 +88,10 @@ def create_app(
                 return {"ready": False, "detail": "BRIDGE_TOKEN ausente"}
             return await services.whatsapp.health()
 
-        llm_state, wa = await asyncio.gather(
+        llm_state, wa, tts_state = await asyncio.gather(
             _bounded(llm_health(), {"ok": False}, timeout),
             _bounded(wa_health(), {"ready": False}, timeout),
+            services.tts_status(),
         )
         vault = services.obsidian
         return {
@@ -103,7 +104,7 @@ def create_app(
                 "notes_dir": settings.obsidian_notes_dir,
                 "vault": str(settings.obsidian_vault_path or ""),
             },
-            "voice": voice.status(),
+            "voice": {**voice.status(), "tts": tts_state},
         }
 
     @asynccontextmanager
@@ -153,7 +154,7 @@ def create_app(
             stop.set()
             for task in workers:
                 task.cancel()
-            for client in (services.llm, services.llm_cloud, services.spotify, services.whatsapp):
+            for client in (services.llm, services.llm_cloud, services.spotify, services.whatsapp, services.tts):
                 if client is not None and hasattr(client, "aclose"):
                     await client.aclose()
 
