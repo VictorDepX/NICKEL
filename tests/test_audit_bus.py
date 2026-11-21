@@ -116,3 +116,24 @@ def test_migrates_legacy_audit_table(tmp_path):
     cols = {row["name"] for row in db.query("PRAGMA table_info(audit)")}
     assert {"run_id", "duration_ms"} <= cols
     assert AuditLog(db).recent(5)[-1]["run_id"] is None
+
+
+def test_redaction_is_recursive():
+    audit = make_audit()
+    event = audit.record(
+        "tool",
+        "x",
+        "ok",
+        {"arguments": {"token": "s", "text": "x" * 900}, "items": ["y" * 900, {"password": "p"}]},
+    )
+    args = event["detail"]["arguments"]
+    assert args["token"] == "***" and len(args["text"]) == 501
+    assert len(event["detail"]["items"][0]) == 501
+    assert event["detail"]["items"][1]["password"] == "***"
+    assert audit.recent(1)[0]["detail"] == event["detail"]
+
+
+def test_text_limit_is_clamped_to_4000():
+    audit = make_audit()
+    event = audit.record("tool", "x", "ok", {"text": "x" * 9000}, text_limit=99999)
+    assert len(event["detail"]["text"]) == 4001

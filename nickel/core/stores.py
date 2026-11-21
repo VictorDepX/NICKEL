@@ -19,6 +19,7 @@ from nickel.core.trace import current_run_id
 log = logging.getLogger(__name__)
 
 MAIN_CONVERSATION = "main"
+MAX_TEXT_LIMIT = 4000
 
 
 @dataclass
@@ -180,7 +181,7 @@ class AuditLog:
         text_limit: int = 500,
     ) -> dict[str, Any]:
         run_id = run_id if run_id is not None else current_run_id.get()
-        clean = _redact(detail or {}, text_limit)
+        clean = _redact(detail or {}, min(text_limit, MAX_TEXT_LIMIT))
         at = iso(utcnow())
         event_id = self.db.execute(
             "INSERT INTO audit (at, kind, name, status, detail, run_id, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -263,16 +264,17 @@ def _decode(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 _SECRET_KEYS = {"access_token", "refresh_token", "token", "password", "secret", "audio_b64", "image_b64"}
 
 
-def _redact(detail: dict[str, Any], limit: int = 500) -> dict[str, Any]:
-    clean: dict[str, Any] = {}
-    for key, value in detail.items():
-        if key in _SECRET_KEYS:
-            clean[key] = "***"
-        elif isinstance(value, str) and len(value) > limit:
-            clean[key] = value[:limit] + "…"
-        else:
-            clean[key] = value
-    return clean
+def _redact(detail: Any, limit: int = 500) -> Any:
+    """Mascara segredos e trunca textos, recursivamente em dicts e listas."""
+    if isinstance(detail, dict):
+        return {
+            key: "***" if key in _SECRET_KEYS else _redact(value, limit) for key, value in detail.items()
+        }
+    if isinstance(detail, (list, tuple)):
+        return [_redact(item, limit) for item in detail]
+    if isinstance(detail, str) and len(detail) > limit:
+        return detail[:limit] + "…"
+    return detail
 
 
 class MemoryStore:
