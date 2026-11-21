@@ -39,7 +39,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         timeout_graceful_shutdown=2,
     )
     server = Server(config)
-    server.run()
+    try:
+        server.run()
+    except KeyboardInterrupt:  # o uvicorn reenvia o SIGINT capturado após o shutdown; `uvicorn.run` faz o mesmo
+        pass
     return 0 if server.started else 3  # como `uvicorn.run`: 3 quando o startup falha
 
 

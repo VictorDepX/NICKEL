@@ -31,3 +31,19 @@ def test_serve_limits_graceful_shutdown_and_signals_sse(monkeypatch, tmp_path):
         assert server.should_exit is True
     finally:
         app_module.SHUTDOWN.clear()
+
+
+def test_serve_ctrl_c_exits_cleanly(monkeypatch, tmp_path):
+    """O uvicorn reenvia o SIGINT capturado depois do shutdown; `uvicorn.run` engole o KeyboardInterrupt."""
+    monkeypatch.setenv("NICKEL_DATA_DIR", str(tmp_path))
+    monkeypatch.chdir(tmp_path)  # sem .env
+
+    def interrupted_run(self, *args, **kwargs):
+        self.started = True
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(uvicorn.Server, "run", interrupted_run)
+    try:
+        assert main(["serve"]) == 0
+    finally:
+        app_module.SHUTDOWN.clear()
