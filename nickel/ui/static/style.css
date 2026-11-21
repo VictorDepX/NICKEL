@@ -35,6 +35,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
@@ -121,15 +123,22 @@ body {
   font: inherit; color: inherit; background: var(--bg);
   border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 12px;
 }
-.composer textarea:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible {
+.composer-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.think-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap;
+}
+.think-toggle input, .chip input { accent-color: var(--accent); margin: 0; }
+.composer textarea:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
 
-button {
+button, a.button {
   font: inherit; font-size: 13px; cursor: pointer;
   border-radius: 8px; padding: 7px 14px;
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
 }
+a.button { display: inline-block; text-decoration: none; white-space: nowrap; }
 button.primary, .composer button { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.danger { color: var(--bad); }
 button:disabled { opacity: 0.55; cursor: progress; }

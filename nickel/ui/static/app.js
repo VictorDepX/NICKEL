@@ -3,6 +3,24 @@
 const $ = (id) => document.getElementById(id);
 const CHANNELS = { whatsapp: "whatsapp", voice: "voz", ui: "ui", lembrete: "lembrete" };
 let lastMessageId = null;
+let catalog = null;
+
+// Estados do pipeline de voz em PT-BR; o catálogo tem prioridade quando o estado vira uma fase.
+const VOICE_LABELS = { idle: "ocioso", listening: "ouvindo", transcribing: "transcrevendo", thinking: "pensando", speaking: "falando", error: "erro" };
+
+function voiceLabel(state) {
+  const phase = catalog && catalog.phases ? catalog.phases[`voice/${state}`] : null;
+  const label = phase && catalog.labels ? catalog.labels[phase] : null;
+  return (label || VOICE_LABELS[state] || state).toLowerCase();
+}
+
+function storageGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* armazenamento indisponível */ }
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -136,7 +154,7 @@ function renderState(state) {
     pill("Google", level(state.google.status), state.google.message || ""),
     pill("Spotify", level(state.spotify.status), state.spotify.message || ""),
     pill("Obsidian", state.obsidian.available ? "ok" : "bad", state.obsidian.vault),
-    pill(`Voz${state.voice.state && state.voice.state !== "idle" ? ": " + state.voice.state : ""}`, state.voice.available ? "ok" : "warn"),
+    pill(`Voz${state.voice.state && state.voice.state !== "idle" ? ": " + voiceLabel(state.voice.state) : ""}`, state.voice.available ? "ok" : "warn"),
   );
 
   const list = $("connections");
@@ -191,7 +209,8 @@ $("composer").addEventListener("submit", async (event) => {
   button.disabled = true;
   input.value = "";
   try {
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ text }) });
+    const payload = $("think").checked ? { text, think: true } : { text };
+    await api("/api/chat", { method: "POST", body: JSON.stringify(payload) });
   } catch (error) {
     alert(`Falha ao enviar: ${error.message}`);
     input.value = text;
@@ -209,6 +228,38 @@ $("input").addEventListener("keydown", (event) => {
 });
 
 $("audit-panel").addEventListener("toggle", refresh);
+
+$("think").checked = storageGet("nickel.think") === "1";
+$("think").addEventListener("change", (event) => storageSet("nickel.think", event.target.checked ? "1" : "0"));
+
+// Abas "Conversa" e "Monitor": a escolha fica guardada; o monitor escuta "nickel:tab".
+function showTab(name, focus = false) {
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  if (!tabs.some((tab) => tab.dataset.tab === name)) name = "conversa";
+  for (const tab of tabs) {
+    const active = tab.dataset.tab === name;
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+    $(tab.dataset.tab).hidden = !active;
+    if (active && focus) tab.focus();
+  }
+  storageSet("nickel.tab", name);
+  window.dispatchEvent(new CustomEvent("nickel:tab", { detail: name }));
+}
+
+document.querySelectorAll('[role="tab"]').forEach((tab, index, all) => {
+  tab.addEventListener("click", () => showTab(tab.dataset.tab));
+  tab.addEventListener("keydown", (event) => {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    showTab(all[(index + step + all.length) % all.length].dataset.tab, true);
+  });
+});
+
+showTab(storageGet("nickel.tab") || "conversa");
+
+api("/api/events/catalog").then((data) => { catalog = data; refreshState(); }).catch(() => {});
 
 refresh();
 refreshState();
