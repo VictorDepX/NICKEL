@@ -246,3 +246,116 @@ def test_run_duration_agrees_between_runs_and_report(client, services):
     assert listed == {"d1": 3300, "d2": 1000}
     assert "Duração: 3,3 s" in client.get("/api/runs/d1/report.md").text
     assert "Duração: 1,0 s" in client.get("/api/runs/d2/report.md").text
+
+
+# ---------------------------------------------------------------- revisão final
+
+
+def test_stream_cancelled_on_shutdown_unsubscribes_quietly(app, services, monkeypatch):
+    monkeypatch.setattr(app_module, "SSE_POLL", 0.01)
+    endpoint = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/events/stream")
+
+    class FakeRequest:
+        headers = {}
+
+        async def is_disconnected(self):
+            return False
+
+    async def scenario():
+        response = await endpoint(FakeRequest(), after=None, once=False)
+
+        async def consume():
+            async for _ in response.body_iterator:
+                pass
+            return "fim"
+
+        task = asyncio.create_task(consume())
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if services.audit.has_subscribers():
+                break
+        assert services.audit.has_subscribers()
+        task.cancel()
+        return await task  # sem CancelledError: o gerador encerra em silêncio
+
+    assert run(scenario()) == "fim"
+    assert services.audit.has_subscribers() is False
+
+
+def test_report_steps_table_skips_reasoning_progress():
+    def event(i, kind, status):
+        return {"id": i, "at": "2026-11-20T10:00:00+00:00", "kind": kind, "name": "model", "status": status,
+                "detail": {"step": 0}, "run_id": "r", "duration_ms": None}
+
+    events = [event(1, "turn", "start")] + [event(i, "reasoning", "progress") for i in range(2, 50)]
+    events.append(event(50, "reasoning", "final"))
+    text = render_run_report(events)
+    steps = text.split("## Etapas")[1].split("## Ferramentas")[0]
+    assert "| progress |" not in steps
+    assert "| final |" in steps and "| start |" in steps
+
+
+def test_startup_prunes_stale_reasoning_progress(services):
+    old = services.audit.record("reasoning", "model", "progress", {"step": 0}, run_id="caiu")
+    services.audit.db.execute("UPDATE audit SET at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (old["id"],))
+    fresh = services.audit.record("reasoning", "model", "progress", {"step": 0}, run_id="vivo")
+    app = create_app(services=services, registry=build_registry(), background=False)
+    with TestClient(app):
+        ids = {e["id"] for e in services.audit.since(0)}
+    assert old["id"] not in ids and fresh["id"] in ids
+
+
+def _state_client(services, settings, **changes):
+    from dataclasses import replace
+
+    services.settings = replace(settings, **changes)
+    return TestClient(create_app(services=services, registry=build_registry(), background=False))
+
+
+def test_state_exposes_think_default_from_settings(services, settings):
+    with _state_client(services, settings) as client:
+        assert client.get("/api/state").json()["think_default"] is False
+    with _state_client(services, settings, llm_think=True) as client:
+        assert client.get("/api/state").json()["think_default"] is True
+
+
+def test_state_think_default_prefers_active_workspace(services, settings):
+    settings.workspaces_dir.mkdir(parents=True, exist_ok=True)
+    (settings.workspaces_dir / "pensa.md").write_text("---\nname: Pensa\nthink: true\n---\nOi\n", encoding="utf-8")
+    (settings.workspaces_dir / "rapido.md").write_text("---\nname: Rápido\nthink: false\n---\nOi\n", encoding="utf-8")
+    services.workspaces.refresh()
+    with _state_client(services, settings, llm_think=False) as client:
+        services.workspaces.activate("pensa")
+        assert client.get("/api/state").json()["think_default"] is True
+    with _state_client(services, settings, llm_think=True) as client:
+        services.workspaces.activate("rapido")
+        assert client.get("/api/state").json()["think_default"] is False
+
+
+def test_stream_ends_by_itself_when_server_starts_shutting_down(app, services, monkeypatch):
+    monkeypatch.setattr(app_module, "SSE_POLL", 0.01)
+    endpoint = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/events/stream")
+
+    class FakeRequest:
+        headers = {}
+        calls = 0
+
+        async def is_disconnected(self):
+            FakeRequest.calls += 1
+            if FakeRequest.calls == 3:
+                app_module.SHUTDOWN.set()
+            return False
+
+    async def scenario():
+        response = await endpoint(FakeRequest(), after=None, once=False)
+        return await asyncio.wait_for(_drain(response), 2)
+
+    async def _drain(response):
+        return [c async for c in response.body_iterator]
+
+    app_module.SHUTDOWN.clear()
+    try:
+        run(scenario())
+    finally:
+        app_module.SHUTDOWN.clear()
+    assert services.audit.has_subscribers() is False

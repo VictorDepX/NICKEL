@@ -173,3 +173,26 @@ def test_replayed_history_converts_in_both_clients(services, llm, registry, clie
     assert [m["role"] for m in converted] == ["system", "user", "assistant", "tool", "tool", "assistant", "user"]
     assert converted[2]["tool_calls"][0]["function"]["name"] == "reminder_create"
     assert all(MARKER not in str(m.get("content") or "") for m in converted)
+
+
+def test_strip_fake_action_marker_singular_and_plural():
+    assert strip_fake_action_marker("Nota criada.\n[ação executada: note_add]") == "Nota criada."
+    assert strip_fake_action_marker("Nota criada.\n[Acao executada: note_add]") == "Nota criada."
+    assert strip_fake_action_marker("Ok.\n[ações executada: x]") == "Ok."
+    assert strip_fake_action_marker("Ok.\n[ação executadas: x]") == "Ok."
+
+
+def test_strip_fake_action_marker_tolerates_brackets_inside_summary():
+    assert strip_fake_action_marker("A.\n[ações executadas: nota [rascunho] salva]") == "A."
+    assert strip_fake_action_marker("A.\n[ações executadas: x:\n lista [1] e [2]]\nB.") == "A.\nB."
+
+
+def test_strip_fake_action_marker_unclosed_runs_to_end():
+    assert strip_fake_action_marker("A.\n[ações executadas: nota criada") == "A."
+    assert strip_fake_action_marker("A.\n[ação executada: x\nmais texto") == "A."
+
+
+def test_strip_fake_action_marker_drops_surrounding_bold():
+    assert strip_fake_action_marker("A.\n**[ações executadas: x]**") == "A."
+    assert strip_fake_action_marker("**[ação executada: x [y]]**\nB.") == "B."
+    assert strip_fake_action_marker("A.\n**[ações executadas: sem fim") == "A."

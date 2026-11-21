@@ -137,3 +137,88 @@ def test_text_limit_is_clamped_to_4000():
     audit = make_audit()
     event = audit.record("tool", "x", "ok", {"text": "x" * 9000}, text_limit=99999)
     assert len(event["detail"]["text"]) == 4001
+
+
+# ---------------------------------------------------------------- revisão final
+
+
+def _progress(audit, run_id, step, at=None):
+    event = audit.record("reasoning", "model", "progress", {"step": step, "tail": "x"}, run_id=run_id)
+    if at is not None:
+        audit.db.execute("UPDATE audit SET at = ? WHERE id = ?", (at, event["id"]))
+    return event
+
+
+def test_reasoning_final_deletes_progress_of_same_run_and_step_only():
+    audit = make_audit()
+
+    async def scenario():
+        queue = audit.subscribe()
+        _progress(audit, "r1", 0)
+        _progress(audit, "r1", 0)
+        _progress(audit, "r1", 1)
+        _progress(audit, "r2", 0)
+        audit.record("reasoning", "model", "final", {"step": 0, "text": "fim"}, run_id="r1")
+        await asyncio.sleep(0)
+        delivered = []
+        while not queue.empty():
+            delivered.append(queue.get_nowait())
+        return delivered
+
+    delivered = asyncio.run(scenario())
+    # quem estava assistindo ao vivo recebeu o progresso antes da limpeza
+    assert [e["status"] for e in delivered] == ["progress"] * 4 + ["final"]
+    left = [(e["run_id"], e["status"], e["detail"]["step"]) for e in audit.since(0)]
+    assert left == [("r1", "progress", 1), ("r2", "progress", 0), ("r1", "final", 0)]
+
+
+def test_prune_stale_progress_removes_only_old_progress_rows():
+    audit = make_audit()
+    _progress(audit, "velho", 0, at="2000-01-01T00:00:00+00:00")
+    _progress(audit, "novo", 0)
+    audit.record("tool", "x", "ok", run_id="velho")
+    audit.db.execute("UPDATE audit SET at = '2000-01-01T00:00:00+00:00' WHERE kind = 'tool'")
+    assert audit.prune_stale_progress() == 1
+    left = [(e["run_id"], e["kind"]) for e in audit.since(0)]
+    assert left == [("novo", "reasoning"), ("velho", "tool")]
+
+
+def test_audit_at_has_millisecond_precision_and_sorts_with_legacy_rows():
+    from datetime import datetime
+
+    audit = make_audit()
+    event = audit.record("tool", "x", "ok")
+    assert len(event["at"]) == len("2026-11-21T10:00:00.123+00:00")
+    assert event["at"][19] == "." and event["at"].endswith("+00:00")
+    assert datetime.fromisoformat(event["at"]).microsecond % 1000 == 0
+    legacy = "2026-11-21T10:00:00+00:00"
+    assert sorted(["2026-11-21T10:00:00.500+00:00", legacy, "2026-11-21T10:00:01+00:00"]) == [
+        legacy, "2026-11-21T10:00:00.500+00:00", "2026-11-21T10:00:01+00:00",
+    ]
+
+
+def test_other_tables_keep_second_precision():
+    from nickel.core.db import iso, utcnow
+
+    assert len(iso(utcnow())) == len("2026-11-21T10:00:00+00:00")
+
+
+def test_redaction_masks_api_keys_and_auth_headers_case_insensitively():
+    audit = make_audit()
+    detail = {
+        "api_key": "k1",
+        "Authorization": "Bearer x",
+        "BRIDGE_TOKEN": "b",
+        "Api_Key": "k2",
+        "nested": [{"authorization": "y"}],
+        "keep": "ok",
+    }
+    clean = audit.record("tool", "x", "ok", detail)["detail"]
+    assert clean == {
+        "api_key": "***",
+        "Authorization": "***",
+        "BRIDGE_TOKEN": "***",
+        "Api_Key": "***",
+        "nested": [{"authorization": "***"}],
+        "keep": "ok",
+    }

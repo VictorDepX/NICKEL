@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,9 @@ SSE_PING = 15.0  # segundos entre comentários `: ping`
 SSE_POLL = 1.0  # segundos entre checagens de desconexão
 SSE_REPLAY = 100  # eventos reprisados quando `after` é omitido
 SSE_PAGE = 500  # tamanho do lote ao paginar `since`
+# Ligado por `nickel serve` no Ctrl+C: os streams SSE abertos (aba do Monitor) encerram em até SSE_POLL,
+# antes de o uvicorn esgotar `timeout_graceful_shutdown` e cancelar a conexão à força.
+SHUTDOWN = threading.Event()
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -106,6 +110,7 @@ def create_app(
     async def lifespan(_app: FastAPI):
         stop = asyncio.Event()
         workers: list[asyncio.Task] = []
+        SHUTDOWN.clear()
         if background:
             removed = prune_media(settings.media_dir)
             if removed:
@@ -114,24 +119,34 @@ def create_app(
             workers.append(asyncio.create_task(services.reminders.run(stop)))
         if background and services.stt is not None and hasattr(services.stt, "warm_up"):
             workers.append(asyncio.create_task(services.stt.warm_up()))
-        async def announce_startup() -> None:
-            services.audit.record(
-                "system",
-                "nickel",
-                "startup",
-                {
-                    "version": VERSION,
-                    "llm": f"{settings.llm_provider}:{settings.llm_model}",
-                    "workspace_count": len(services.workspaces.all()),
-                },
-            )
-            services.audit.record("system", "nickel", "health", await services_snapshot(HEALTH_TIMEOUT))
+        async def announce_health() -> None:
+            try:
+                services.audit.record("system", "nickel", "health", await services_snapshot(HEALTH_TIMEOUT))
+            except Exception:
+                log.exception("falha ao registrar o evento de saúde")
 
         try:
             try:
-                await announce_startup()
+                removed = services.audit.prune_stale_progress()
+                if removed:
+                    log.info("%s evento(s) reasoning/progress órfão(s) removido(s)", removed)
+            except Exception:
+                log.exception("falha ao limpar raciocínio parcial antigo")
+            try:
+                services.audit.record(
+                    "system",
+                    "nickel",
+                    "startup",
+                    {
+                        "version": VERSION,
+                        "llm": f"{settings.llm_provider}:{settings.llm_model}",
+                        "workspace_count": len(services.workspaces.all()),
+                    },
+                )
             except Exception:
                 log.exception("falha ao registrar os eventos de startup")
+            # A saúde consulta serviços (até HEALTH_TIMEOUT); roda depois do startup para não atrasar a subida.
+            workers.append(asyncio.create_task(announce_health()))
             yield
         finally:
             services.audit.record("system", "nickel", "shutdown")
@@ -162,11 +177,14 @@ def create_app(
 
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
+        active = services.workspaces.active()
         return {
             **await services_snapshot(),
             "music": services.music is not None,
             "tools": [tool.name for tool in registry.available(services)],
-            "workspace": services.workspaces.active().id,
+            "workspace": active.id,
+            # Padrão efetivo de `think` quando a UI não manda: o do workspace ativo, senão LLM_THINK.
+            "think_default": active.think if active.think is not None else settings.llm_think,
         }
 
     @app.get("/api/messages")
@@ -275,7 +293,7 @@ def create_app(
                 if once:
                     return
                 idle = 0.0
-                while not await request.is_disconnected():
+                while not SHUTDOWN.is_set() and not await request.is_disconnected():
                     try:
                         event = await asyncio.wait_for(queue.get(), SSE_POLL)
                     except asyncio.TimeoutError:
@@ -296,6 +314,9 @@ def create_app(
                     if event["id"] > sent:
                         sent = event["id"]
                         yield _frame(event)
+            except asyncio.CancelledError:
+                # Desligamento do servidor (timeout_graceful_shutdown) com a aba aberta: encerra sem traceback.
+                return
             finally:
                 audit_log.unsubscribe(queue)
 

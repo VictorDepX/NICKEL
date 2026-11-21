@@ -140,12 +140,16 @@ def test_plain_llm_emits_no_reasoning(services, llm, registry):
 def test_streamed_turn_with_real_audit_log_keeps_full_text_and_short_tail(services, registry):
     long_reasoning = "Primeiro penso no pedido. " + "x" * 1500 + " Então respondo."
     services.llm = StreamingFakeLLM([say("Ok.")], deltas=[("reasoning", long_reasoning)])
+    live: list[dict[str, Any]] = []
+    original = services.audit.record
+    services.audit.record = lambda *a, **k: live.append(original(*a, **k)) or live[-1]
     run(Agent(services, registry).handle(Turn(channel="ui", text="pense")))
     stored = services.audit.since(0)  # lido de volta do SQLite
     final = _only(stored, "reasoning", "final")[0]["detail"]
     assert final["text"] == long_reasoning
-    progress = _only(stored, "reasoning", "progress")
+    progress = _only(live, "reasoning", "progress")  # entregue ao vivo...
     assert progress and all(len(p["detail"]["tail"]) <= 600 for p in progress)
+    assert not _only(stored, "reasoning", "progress")  # ...e apagado do banco quando o final chega
     assert len({e["run_id"] for e in stored}) == 1
 
 
@@ -355,3 +359,30 @@ def test_cloud_workspace_without_cloud_client_records_local_backend(services, ll
         "backend": "local",
         "requested_backend": "cloud",
     }
+
+
+class PerCallStream(StreamingFakeLLM):
+    """Streaming com deltas diferentes em cada chamada."""
+
+    def __init__(self, replies, per_call):
+        super().__init__(replies)
+        self.per_call = list(per_call)
+
+    async def chat(self, messages, tools=None, options=None, on_delta=None):
+        self.deltas = self.per_call.pop(0) if self.per_call else []
+        return await super().chat(messages, tools, options, on_delta)
+
+
+def test_answering_is_a_real_event_only_on_the_step_that_streams_content(services, registry):
+    services.llm = PerCallStream(
+        [call("echo", text="a"), say("Pronto.")],
+        [[("reasoning", "Vou usar echo.")], [("reasoning", "Agora respondo."), ("content", "Pronto.")]],
+    )
+    run(Agent(services, registry).handle(Turn(channel="ui", text="repete a")))
+    events = _events(services)
+    answering = _only(events, "reasoning", "answering")
+    assert len(answering) == 1 and answering[0]["detail"] == {"step": 1}
+    pairs = _pairs(events)
+    second_start = len(pairs) - 1 - pairs[::-1].index(("llm", "start"))
+    assert pairs.index(("tool", "ok")) < second_start < pairs.index(("reasoning", "answering"))
+    assert pairs.index(("reasoning", "answering")) < len(pairs) - 1 - pairs[::-1].index(("llm", "done"))

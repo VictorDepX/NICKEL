@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -130,9 +131,21 @@ def test_outbound_event_keeps_existing_shape(services):
     assert _events(services, "outbound")[-1]["status"] == "undelivered"
 
 
+def _wait_for(services, status: str, timeout: float = 2.0) -> dict:
+    """O `system/health` roda em segundo plano depois do startup: espera ele aparecer."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = [e for e in _events(services, "system") if e["status"] == status]
+        if found:
+            return found[0]
+        time.sleep(0.01)
+    raise AssertionError(f"system/{status} não apareceu")
+
+
 def test_lifespan_emits_startup_and_shutdown(services):
     app = create_app(services=services, registry=build_registry(), background=False)
     with TestClient(app):
+        _wait_for(services, "health")
         startup = _events(services, "system")
         assert [e["status"] for e in startup][:1] == ["startup"]
         detail = startup[0]["detail"]
@@ -146,7 +159,7 @@ def test_lifespan_emits_startup_and_shutdown(services):
 def test_health_event_contains_service_snapshot_without_secrets(services):
     app = create_app(services=services, registry=build_registry(), background=False)
     with TestClient(app):
-        health = [e for e in _events(services, "system") if e["status"] == "health"][0]
+        health = _wait_for(services, "health")
     assert set(health["detail"]) == {"llm", "whatsapp", "google", "spotify", "obsidian", "voice"}
     dump = str(health["detail"]).lower()
     for secret in ("segredo", "token_key", services.settings.oauth_token_key.lower()):
@@ -162,5 +175,23 @@ def test_health_event_is_recorded_even_if_llm_is_slow(services, monkeypatch):
     services.llm.health = slow
     app = create_app(services=services, registry=build_registry(), background=False)
     with TestClient(app):
-        health = [e for e in _events(services, "system") if e["status"] == "health"][0]
+        health = _wait_for(services, "health")
     assert health["detail"]["llm"]["ok"] is False
+
+
+def test_startup_does_not_wait_for_health(services, monkeypatch):
+    async def slow():
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr("nickel.app.HEALTH_TIMEOUT", 30.0)
+    services.llm.health = slow
+    app = create_app(services=services, registry=build_registry(), background=False)
+    started = time.monotonic()
+    with TestClient(app):
+        entered = time.monotonic() - started
+        statuses = [e["status"] for e in _events(services, "system")]
+    assert entered < 1.0
+    assert statuses == ["startup"]
+    final = [e["status"] for e in _events(services, "system")]
+    assert final == ["startup", "shutdown"]
+    assert time.monotonic() - started < 2.0

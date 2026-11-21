@@ -23,6 +23,7 @@ _ARROWS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("llm", "done"): ("Modelo", "Agente", "-->>"),
     ("llm", "error"): ("Modelo", "Agente", "-->>"),
     ("reasoning", "progress"): ("Modelo", "Agente", "-->>"),
+    ("reasoning", "answering"): ("Modelo", "Agente", "-->>"),
     ("reasoning", "final"): ("Modelo", "Agente", "-->>"),
     ("tool", "start"): ("Agente", "Ferramenta", "->>"),
     ("tool", "ok"): ("Ferramenta", "Agente", "-->>"),

@@ -2,7 +2,8 @@
 
 O resumo nunca chama um modelo: cabeçalho e conclusão vêm das frases do
 próprio texto. O rastreador recebe os deltas do LLM (``on_delta``) e grava
-eventos ``reasoning/progress`` (limitados por tempo) e ``reasoning/final``.
+eventos ``reasoning/progress`` (limitados por tempo), ``reasoning/answering``
+(uma vez, no primeiro trecho real da resposta) e ``reasoning/final``.
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ class ReasoningTracker:
         self._last_emit: float | None = None
         self._summary: ReasoningSummary | None = None
         self._seen_text = False
+        self._answering = False
 
     def _record(self, status: str, detail: dict[str, Any], limit: int) -> None:
         try:
@@ -91,6 +93,10 @@ class ReasoningTracker:
         if channel != "reasoning":
             if channel == "content":
                 self._content_chars += len(text)
+                if not self._answering and text.strip():
+                    # Fase "Respondendo" real: o modelo começou a escrever a resposta (não um pedido de ferramenta).
+                    self._answering = True
+                    self._record("answering", {"step": self.step}, self.tail_chars)
             return
         if not text:
             return

@@ -86,10 +86,11 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def iso(dt: datetime) -> str:
+def iso(dt: datetime, *, ms: bool = False) -> str:
+    """ISO 8601 em UTC; `ms=True` (só a auditoria) guarda milissegundos e ainda ordena junto com o formato antigo."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
+    return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds" if ms else "seconds")
 
 
 def parse_iso(value: str) -> datetime:
@@ -125,6 +126,11 @@ class Database:
         with self._lock:
             cur = self._conn.execute(sql, tuple(params))
             return cur.lastrowid if cur.lastrowid is not None else cur.rowcount
+
+    def delete(self, sql: str, params: Iterable[Any] = ()) -> int:
+        """Executa um DELETE/UPDATE e devolve as linhas afetadas (`execute` devolve o último rowid inserido)."""
+        with self._lock:
+            return self._conn.execute(sql, tuple(params)).rowcount
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self._lock:

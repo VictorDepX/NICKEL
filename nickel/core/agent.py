@@ -37,12 +37,18 @@ _NO = {"nao", "n", "cancela", "cancelar", "cancelado", "deixa", "esquece", "no",
 _FILLER = {"pode", "por", "favor", "pfv", "pf", "e", "isso", "mesmo", "precisa", "agora", "ai", "la"}
 
 # Marcador textual que versões antigas punham no histórico; o modelo aprendeu a imitá-lo sem chamar a tool.
-_FAKE_ACTION_MARKER = re.compile(r"[ \t]*\n?[ \t]*\[\s*a[çc][õo]es\s+executadas\s*:[^\]]*\]", re.IGNORECASE)
+# Singular ou plural, com ou sem `**` em volta. O fim é o último `]` da linha em que o marcador fecha
+# (o resumo pode ter `]` dentro); sem `]`, vai até o fim do texto.
+_FAKE_ACTION_MARKER = re.compile(
+    r"[ \t]*\n?[ \t]*(?:\*\*)?\[\s*a[çc](?:[õo]es|[ãa]o)\s+executadas?\s*:"
+    r"(?:(?:[^\]\n]*\n)*?[^\n]*\](?:\*\*)?|[\s\S]*\Z)",
+    re.IGNORECASE,
+)
 _FAKE_ACTION_WARNING = "(Atenção: nenhuma ação foi executada.)"
 
 
 def strip_fake_action_marker(text: str) -> str:
-    """Remove blocos `[ações executadas: …]` (até o `]`, mesmo em várias linhas) do texto."""
+    """Remove blocos `[ações executadas: …]`/`[ação executada: …]` (mesmo em várias linhas) do texto."""
     if not _FAKE_ACTION_MARKER.search(text):
         return text
     return _FAKE_ACTION_MARKER.sub("", text).strip()

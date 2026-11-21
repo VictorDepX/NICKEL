@@ -57,7 +57,7 @@ def test_content_channel_does_not_emit_reasoning_events():
     t = ReasoningTracker(audit, step=1, clock=FakeClock())
     t.feed("content", "olá")
     assert t.finish().chars == 0
-    assert audit.events == []
+    assert [e[2] for e in audit.events] == ["answering"]  # só o início da resposta, nada de raciocínio
 
 
 def test_final_event_keeps_up_to_4000_chars_and_emitted_once():
@@ -97,7 +97,7 @@ def test_whitespace_only_reasoning_emits_no_progress_or_final():
     tracker.feed("reasoning", "  \n\t")
     tracker.feed("content", "Feito.")
     tracker.finish()
-    assert audit.events == []
+    assert [e[2] for e in audit.events] == ["answering"]
 
 
 def test_progress_starts_once_reasoning_has_text():
@@ -109,3 +109,28 @@ def test_progress_starts_once_reasoning_has_text():
     statuses = [e[2] for e in audit.events]
     assert statuses == ["progress", "final"]
     assert audit.events[0][3]["chars"] == len("\nPenso.")
+
+
+def test_answering_is_recorded_once_on_first_real_content_delta():
+    audit = FakeAudit()
+    tracker = ReasoningTracker(audit, step=3, clock=FakeClock())
+    tracker.feed("reasoning", "Penso.")
+    tracker.feed("content", "")
+    tracker.feed("content", "\n  ")
+    assert [e[2] for e in audit.events] == ["progress"]
+    tracker.feed("content", "Olá")
+    tracker.feed("content", " mundo")
+    tracker.feed("reasoning", " mais")
+    tracker.finish()
+    answering = [e for e in audit.events if e[2] == "answering"]
+    assert len(answering) == 1
+    assert answering[0][:4] == ("reasoning", "model", "answering", {"step": 3})
+    assert [e[2] for e in audit.events] == ["progress", "answering", "final"]
+
+
+def test_reasoning_only_step_never_records_answering():
+    audit = FakeAudit()
+    tracker = ReasoningTracker(audit, step=0, clock=FakeClock())
+    tracker.feed("reasoning", "Vou chamar a ferramenta.")
+    tracker.finish()
+    assert "answering" not in [e[2] for e in audit.events]

@@ -20,15 +20,27 @@ def _base_url(settings) -> str:
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
+    from nickel.app import SHUTDOWN
+
+    class Server(uvicorn.Server):
+        def handle_exit(self, sig, frame) -> None:
+            SHUTDOWN.set()  # streams SSE abertos fecham sozinhos, sem esperar o teto abaixo
+            super().handle_exit(sig, frame)
+
     settings = load_settings()
-    uvicorn.run(
+    config = uvicorn.Config(
         "nickel.app:main_app",
         factory=True,
         host=args.host or settings.host,
         port=args.port or settings.port,
         log_level="info",
+        # Uma aba com o Monitor aberto mantém o SSE vivo: sem este teto, o Ctrl+C ficava em
+        # "Waiting for connections to close" e o segundo Ctrl+C pulava o shutdown.
+        timeout_graceful_shutdown=2,
     )
-    return 0
+    server = Server(config)
+    server.run()
+    return 0 if server.started else 3  # como `uvicorn.run`: 3 quando o startup falha
 
 
 def cmd_listen(_args: argparse.Namespace) -> int:

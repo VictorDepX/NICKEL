@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 MAIN_CONVERSATION = "main"
 MAX_TEXT_LIMIT = 4000
+PROGRESS_MAX_AGE = timedelta(hours=1)  # idade a partir da qual `reasoning/progress` órfão é apagado no startup
 
 
 @dataclass
@@ -182,11 +183,18 @@ class AuditLog:
     ) -> dict[str, Any]:
         run_id = run_id if run_id is not None else current_run_id.get()
         clean = _redact(detail or {}, min(text_limit, MAX_TEXT_LIMIT))
-        at = iso(utcnow())
+        at = iso(utcnow(), ms=True)
         event_id = self.db.execute(
             "INSERT INTO audit (at, kind, name, status, detail, run_id, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (at, kind, name, status, dumps(clean), run_id, duration_ms),
         )
+        if kind == "reasoning" and status == "final":
+            # O parcial já foi entregue ao vivo; no banco só o final importa (sem isto, até 2,5 linhas/s para sempre).
+            self.db.delete(
+                "DELETE FROM audit WHERE run_id IS ? AND kind = 'reasoning' AND status = 'progress'"
+                " AND json_extract(detail, '$.step') IS ?",
+                (run_id, clean.get("step") if isinstance(clean, dict) else None),
+            )
         event = {
             "id": event_id,
             "at": at,
@@ -223,6 +231,13 @@ class AuditLog:
             except Exception:  # loop fechado ou falha ao entregar: auditar nunca derruba o fluxo
                 log.debug("assinante do audit descartado", exc_info=True)
                 self.unsubscribe(queue)
+
+    def prune_stale_progress(self, older_than: timedelta = PROGRESS_MAX_AGE) -> int:
+        """Apaga `reasoning/progress` antigos que ficaram de turnos que caíram antes do `final`."""
+        cutoff = iso(utcnow() - older_than, ms=True)
+        return self.db.delete(
+            "DELETE FROM audit WHERE kind = 'reasoning' AND status = 'progress' AND at < ?", (cutoff,)
+        )
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         return _decode(self.db.query("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,)))
@@ -263,14 +278,21 @@ def _decode(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-_SECRET_KEYS = {"access_token", "refresh_token", "token", "password", "secret", "audio_b64", "image_b64"}
+_SECRET_KEYS = {
+    "access_token", "refresh_token", "token", "password", "secret", "audio_b64", "image_b64",
+    "api_key", "authorization", "bridge_token",
+}
+
+
+def _is_secret(key: Any) -> bool:
+    return isinstance(key, str) and key.lower() in _SECRET_KEYS
 
 
 def _redact(detail: Any, limit: int = 500) -> Any:
-    """Mascara segredos e trunca textos, recursivamente em dicts e listas."""
+    """Mascara segredos (chave sem diferenciar maiúsculas) e trunca textos, recursivamente em dicts e listas."""
     if isinstance(detail, dict):
         return {
-            key: "***" if key in _SECRET_KEYS else _redact(value, limit) for key, value in detail.items()
+            key: "***" if _is_secret(key) else _redact(value, limit) for key, value in detail.items()
         }
     if isinstance(detail, (list, tuple)):
         return [_redact(item, limit) for item in detail]

@@ -48,6 +48,8 @@ def render_run_report(events: list[dict[str, Any]]) -> str:
         "| --- | --- | --- | --- | --- |",
     ]
     for e in events:
+        if e["kind"] == "reasoning" and e["status"] == "progress":
+            continue  # parciais do raciocínio: o `final` do passo resume tudo
         ms = e.get("duration_ms")
         lines.append(
             f"| {_hour(e['at'])} | {_cell(e['kind'])} | {_cell(e['name'])} | {_cell(e['status'])} | "

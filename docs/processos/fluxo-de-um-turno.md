@@ -20,6 +20,7 @@ sequenceDiagram
     Agente->>Ferramenta: tool/start
     Ferramenta-->>Agente: tool/ok
     Agente->>Modelo: llm/start
+    Modelo-->>Agente: reasoning/answering
     Modelo-->>Agente: llm/done
     Agente-->>Canal: turn/done
 ```
@@ -30,10 +31,11 @@ sequenceDiagram
 2. `route/resolved`: Resolução da rota (workspace/skill) de um turno.
 3. `prompt/built`: Montagem do prompt enviado ao modelo.
 4. `llm/start`: Chamadas ao modelo de linguagem.
-5. `reasoning/final`: Raciocínio do modelo, parcial e final.
+5. `reasoning/final`: Raciocínio do modelo (parcial e final) e o início da resposta.
 6. `llm/done`: Chamadas ao modelo de linguagem.
 7. `tool/start`: Execução de ferramentas pelo agente.
 8. `tool/ok`: Execução de ferramentas pelo agente.
 9. `llm/start`: Chamadas ao modelo de linguagem.
-10. `llm/done`: Chamadas ao modelo de linguagem.
-11. `turn/done`: Ciclo completo de um turno de conversa.
+10. `reasoning/answering`: Raciocínio do modelo (parcial e final) e o início da resposta.
+11. `llm/done`: Chamadas ao modelo de linguagem.
+12. `turn/done`: Ciclo completo de um turno de conversa.
