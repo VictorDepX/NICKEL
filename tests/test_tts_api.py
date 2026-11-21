@@ -297,3 +297,179 @@ def test_chat_does_not_speak_when_voice_is_off(services, llm):
         assert client.post("/api/chat", json={"text": "oi"}).json()["text"] == "Só texto."
         time.sleep(0.1)
     assert _tts(services) == []
+
+
+# ------------------------------------------------------------------ Limite de texto
+
+
+def test_speak_truncates_long_text_at_sentence_boundary(services):
+    speaker = _with_speaker(services, FakeSpeaker())
+    sentence = "Esta é uma frase de teste com algumas palavras."  # 47 caracteres
+    text = " ".join([sentence] * 200)  # ~9600 caracteres
+    run(services.speak(text, source="ui"))
+    spoken = speaker.spoken[0]
+    assert len(spoken) <= 4000 and spoken.endswith("palavras.")
+    assert text.startswith(spoken)
+    start, done = _tts(services)
+    assert start["detail"]["chars"] == len(spoken) == done["detail"]["chars"]
+
+
+def test_short_text_is_spoken_as_is(services):
+    speaker = _with_speaker(services, FakeSpeaker())
+    run(services.speak("**Oi** tudo bem?", source="ui"))
+    assert speaker.spoken == ["**Oi** tudo bem?"]  # a limpeza fica com o provedor
+
+
+def test_tts_speak_rejects_text_over_limit_with_413(services):
+    speaker = _with_speaker(services, FakeSpeaker())
+    with _client(services) as client:
+        response = client.post("/api/tts/speak", json={"text": "a" * 4001})
+        assert response.status_code == 413
+        assert "4000 caracteres" in response.json()["detail"]
+        assert client.post("/api/tts/speak", json={"text": "a" * 4000}).status_code == 202
+        _wait_for(lambda: len(speaker.spoken) == 1)
+
+
+# ------------------------------------------------------------------ Nota de voz do WhatsApp
+
+
+class NoteSpeaker(FakeSpeaker):
+    """Speaker cuja síntese (`synthesize`) só termina quando `release` é liberado."""
+
+    def __init__(self, work_dir, *, fail: Exception | None = None, block: bool = True) -> None:
+        super().__init__(block=True)
+        self.work_dir = work_dir
+        self.synth: list[str] = []
+        self.synth_fail = fail
+        self.synth_block = block
+        self.release = asyncio.Event()
+        self.started = asyncio.Event()
+
+    async def synthesize(self, text: str):
+        self.synth.append(text)
+        self.started.set()
+        if self.synth_block:
+            await self.release.wait()
+        if self.synth_fail is not None:
+            raise self.synth_fail
+        path = self.work_dir / f"nota{len(self.synth)}.wav"
+        path.write_bytes(b"RIFF....WAVE")
+        return path
+
+
+def _wa_channel(services, monkeypatch):
+    from nickel.channels.whatsapp import WhatsAppChannel
+    from nickel.core.agent import Agent
+
+    async def fake_ogg(wav):
+        assert wav.exists()
+        return b"ogg:" + wav.name.encode()
+
+    monkeypatch.setattr("nickel.speech.tts.wav_to_ogg_opus", fake_ogg)
+    services.settings = dataclasses.replace(services.settings, wa_voice_replies=True, music_auto_detect=False)
+
+    class STT:
+        async def transcribe(self, path):
+            return "me responde em áudio"
+
+    services.stt = STT()
+    return WhatsAppChannel(services, Agent(services, build_registry()))
+
+
+def _audio(message_id: str) -> dict:
+    import base64
+
+    return {"id": message_id, "type": "ptt", "mimetype": "audio/ogg", "media_b64": base64.b64encode(b"OggS").decode()}
+
+
+def test_whatsapp_sends_text_before_voice_note_is_synthesized(services, llm, monkeypatch, tmp_path):
+    speaker = _with_speaker(services, NoteSpeaker(tmp_path))
+    channel = _wa_channel(services, monkeypatch)
+    llm.queue(say("Resposta em texto e voz."))
+
+    async def scenario():
+        reply = await asyncio.wait_for(channel.handle_inbound(_audio("v1")), 1)  # não espera a síntese
+        assert reply == "Resposta em texto e voz."
+        assert services.whatsapp.sent == ["Resposta em texto e voz."]
+        await asyncio.wait_for(speaker.started.wait(), 1)
+        assert services.whatsapp.voice == []  # síntese ainda presa
+        speaker.release.set()
+        await asyncio.wait_for(asyncio.gather(*channel.voice_tasks), 1)
+
+    run(scenario())
+    assert speaker.synth == ["Resposta em texto e voz."]
+    assert services.whatsapp.voice == [b"ogg:nota1.wav"]
+    assert not (tmp_path / "nota1.wav").exists()  # o WAV temporário é apagado
+    start, done = _tts(services)
+    assert start["status"] == "start" and done["status"] == "done"
+    assert start["detail"] == {
+        "source": "whatsapp", "chars": len("Resposta em texto e voz."), "provider": "voicestudio", "voice": "default",
+    }
+    assert done["detail"] == {"chars": len("Resposta em texto e voz.")}
+    keys = [(e["kind"], e["status"]) for e in reversed(services.audit.recent(500))]
+    assert keys.index(("whatsapp", "replied")) < keys.index(("tts", "start"))
+    replied = [e for e in reversed(services.audit.recent(500)) if (e["kind"], e["status"]) == ("whatsapp", "replied")]
+    assert replied[0]["detail"]["voice"] is True
+    for event in _tts(services):
+        assert set(event["detail"]) <= set(CATALOG["tts"].fields)
+
+
+def test_whatsapp_voice_note_failure_is_audited_and_text_still_sent(services, llm, monkeypatch, tmp_path):
+    _with_speaker(services, NoteSpeaker(tmp_path, fail=RuntimeError("VoiceStudio caiu"), block=False))
+    channel = _wa_channel(services, monkeypatch)
+    llm.queue(say("Só o texto chega."))
+
+    async def scenario():
+        await asyncio.wait_for(channel.handle_inbound(_audio("v2")), 1)
+        await asyncio.wait_for(asyncio.gather(*channel.voice_tasks), 1)
+
+    run(scenario())
+    assert services.whatsapp.sent == ["Só o texto chega."] and services.whatsapp.voice == []
+    assert _statuses(services) == ["start", "error"]
+    assert _tts(services)[-1]["detail"] == {"source": "whatsapp", "detail": "VoiceStudio caiu"}
+
+
+def test_whatsapp_voice_note_is_skipped_while_gui_speaks(services, llm, monkeypatch, tmp_path):
+    speaker = _with_speaker(services, NoteSpeaker(tmp_path))
+    channel = _wa_channel(services, monkeypatch)
+    llm.queue(say("Agora não dá para falar."))
+
+    async def scenario():
+        gui = asyncio.create_task(services.speak("Fala da GUI.", source="ui"))
+        while not speaker.spoken:
+            await asyncio.sleep(0)
+        await asyncio.wait_for(channel.handle_inbound(_audio("v3")), 1)
+        await asyncio.wait_for(asyncio.gather(*channel.voice_tasks), 1)
+        assert not gui.done()  # a fala da GUI segue
+        services.stop_speaking()
+        await asyncio.wait_for(gui, 1)
+
+    run(scenario())
+    assert services.whatsapp.sent == ["Agora não dá para falar."]
+    assert speaker.synth == [] and services.whatsapp.voice == []
+    events = _tts(services)
+    busy = [e for e in events if e["status"] == "error"]
+    assert busy[0]["detail"] == {"source": "whatsapp", "detail": "voz ocupada"}
+    assert [e["status"] for e in events] == ["start", "error", "done"]
+
+
+def test_gui_speech_takes_over_a_pending_voice_note(services, llm, monkeypatch, tmp_path):
+    speaker = _with_speaker(services, NoteSpeaker(tmp_path))
+    speaker.block = False
+    channel = _wa_channel(services, monkeypatch)
+    llm.queue(say("Nota que vai ser cortada."))
+
+    async def scenario():
+        await asyncio.wait_for(channel.handle_inbound(_audio("v4")), 1)
+        await asyncio.wait_for(speaker.started.wait(), 1)
+        await asyncio.wait_for(services.speak("GUI.", source="ui"), 1)  # uma fala por vez: a nota cede
+        await asyncio.wait_for(asyncio.gather(*channel.voice_tasks), 1)
+
+    run(scenario())
+    assert services.whatsapp.voice == []
+    assert speaker.spoken == ["GUI."]
+    events = _tts(services)
+    assert [(e["detail"].get("source"), e["status"]) for e in events] == [
+        ("whatsapp", "start"), (None, "done"), ("ui", "start"), (None, "done"),
+    ]
+    assert events[1]["detail"]["interrupted"] is True

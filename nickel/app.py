@@ -23,7 +23,7 @@ from nickel.core.events import CATALOG, PHASE_LABELS, PHASES
 from nickel.core.report import render_run_report
 from nickel.core.trace import new_run_id, run_scope
 from nickel.core.skills import ToolRegistry
-from nickel.services import Services, build_services
+from nickel.services import SPEECH_MAX_CHARS, Services, build_services
 from nickel.skills import build_registry
 
 log = logging.getLogger(__name__)
@@ -266,6 +266,10 @@ def create_app(
         text = str(payload.get("text") or "").strip()
         if not text:
             raise HTTPException(400, "Texto vazio: informe o que falar.")
+        if len(text) > SPEECH_MAX_CHARS:
+            raise HTTPException(
+                413, f"Texto longo demais para falar: o limite é {SPEECH_MAX_CHARS} caracteres (recebi {len(text)})."
+            )
         spawn(services.speak(text, source="ui"))
         return {"accepted": True}
 

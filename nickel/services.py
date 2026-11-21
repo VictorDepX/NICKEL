@@ -6,7 +6,8 @@ import asyncio
 import importlib.util
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Awaitable, Callable
 
 from nickel.config import Settings
 from nickel.core.db import Database
@@ -21,9 +22,21 @@ from nickel.core.stores import (
     TokenStore,
 )
 from nickel.core.workspaces import Workspace, WorkspaceManager
+from nickel.speech.playback import discard
+from nickel.speech.tts import split_for_tts
 
 
 VOICE_OFF = "voz indisponível"
+VOICE_BUSY = "voz ocupada"
+SPEECH_MAX_CHARS = 4000  # teto de uma fala: `/api/tts/speak` recusa acima disso; o chat trunca
+
+
+def speech_text(text: str) -> str:
+    """Texto acima de `SPEECH_MAX_CHARS` vira só o primeiro bloco, cortado em fim de frase."""
+    if len(text) <= SPEECH_MAX_CHARS:
+        return text
+    pieces = split_for_tts(text, SPEECH_MAX_CHARS)
+    return pieces[0] if pieces else ""
 
 
 def module_available(name: str) -> bool:
@@ -103,10 +116,15 @@ class Services:
         self._tts_cache = (now, result)
         return {"provider": provider, **result}
 
+    def speaking(self) -> bool:
+        """Há uma fala (ou nota de voz) ativa."""
+        return self._speech is not None and not self._speech.done()
+
     async def speak(self, text: str, *, source: str) -> str | None:
         """Fala `text` com auditoria (`tts/start` → `tts/done` | `tts/error`). Nunca levanta.
 
         Devolve a mensagem de erro, ou None (falou, foi interrompida ou substituída).
+        Texto acima de `SPEECH_MAX_CHARS` é truncado em fim de frase (`speech_text`).
         Só uma síntese fica ativa: cada chamada pega uma geração nova; a fala anterior é
         cancelada e registra o fim antes de a nova começar, e quem foi substituído (ou
         parado por `stop_speaking`) enquanto esperava não chega a falar. A síntese roda
@@ -115,6 +133,7 @@ class Services:
         if self.tts is None:
             self.audit.record("tts", "tts", "error", {"source": source, "detail": VOICE_OFF})
             return VOICE_OFF
+        text = speech_text(text)
         self._speech_gen += 1
         gen = self._speech_gen
         self.tts.stop()
@@ -126,7 +145,35 @@ class Services:
                 return None  # outra fala chegou depois, ou "Parar" foi pedido
         if self._speech_gen != gen:
             return None
-        task = asyncio.create_task(self._speak_now(text, source))
+        return await self._run_speech(self._audited(text, source, self.tts.speak))
+
+    async def voice_note(self, text: str, *, source: str, deliver: Callable[[Path], Awaitable[None]]) -> str | None:
+        """Sintetiza `text` num WAV e o entrega a `deliver` (ex.: nota de voz do WhatsApp), com a
+        mesma auditoria de `speak`. Nunca levanta; devolve a mensagem de erro ou None.
+
+        Não disputa a voz: com uma fala ativa, desiste e registra `tts/error` "voz ocupada".
+        Enquanto sintetiza, ocupa a vez (`_speech`): uma fala nova ou "Parar" a cancela.
+        """
+        if self.tts is None:
+            self.audit.record("tts", "tts", "error", {"source": source, "detail": VOICE_OFF})
+            return VOICE_OFF
+        if self.speaking():
+            self.audit.record("tts", self._provider_name(), "error", {"source": source, "detail": VOICE_BUSY})
+            return VOICE_BUSY
+        tts = self.tts
+
+        async def synthesize_and_deliver(spoken: str) -> None:
+            wav = await tts.synthesize(spoken)
+            try:
+                await deliver(wav)
+            finally:
+                discard(wav)
+
+        return await self._run_speech(self._audited(speech_text(text), source, synthesize_and_deliver))
+
+    async def _run_speech(self, coro) -> str | None:
+        """Roda a fala numa tarefa própria, registrada como a fala ativa."""
+        task = asyncio.create_task(coro)
         self._speech = task
         try:
             await asyncio.wait({task})
@@ -135,8 +182,11 @@ class Services:
             raise
         return None if task.cancelled() else task.result()
 
-    async def _speak_now(self, text: str, source: str) -> str | None:
-        provider = self.tts_provider or resolve_tts_provider(self.settings) or "tts"
+    def _provider_name(self) -> str:
+        return self.tts_provider or resolve_tts_provider(self.settings) or "tts"
+
+    async def _audited(self, text: str, source: str, action: Callable[[str], Awaitable[Any]]) -> str | None:
+        provider = self._provider_name()
         if provider == "voicestudio":
             voice = self.settings.voicestudio_voice
         else:
@@ -150,7 +200,7 @@ class Services:
             return int((time.monotonic() - started) * 1000)
 
         try:
-            await self.tts.speak(text)
+            await action(text)
         except asyncio.CancelledError:
             self.audit.record("tts", provider, "done", {"chars": chars, "interrupted": True}, duration_ms=elapsed())
         except Exception as exc:

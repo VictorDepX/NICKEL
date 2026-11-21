@@ -92,6 +92,8 @@ class WhatsAppChannel:
     def __init__(self, services: "Services", agent: Agent) -> None:
         self.services = services
         self.agent = agent
+        # Notas de voz em segundo plano; o conjunto guarda a referência (sem ele, o GC pode coletá-las).
+        self.voice_tasks: set[asyncio.Task] = set()
 
     def _save_media(self, message_id: str, media_b64: str, mime: str | None, fallback_ext: str) -> Path:
         media_dir = self.services.settings.media_dir
@@ -169,7 +171,7 @@ class WhatsAppChannel:
         audit = self.services.audit
         audit.record("whatsapp", "inbound", "received", {"type": payload.get("type"), "id": message_id})
         client = self.services.whatsapp
-        voice_reply = False
+        voice_text: str | None = None
         try:
             turn = await self.build_turn(payload)
             if isinstance(turn, str):
@@ -181,14 +183,21 @@ class WhatsAppChannel:
                     self.services.settings.wa_voice_replies
                     and turn.last_audio_path is not None
                     and self.services.tts is not None
+                    and reply_text.strip()
                 ):
-                    voice_reply = await self._send_voice(reply_text)
+                    voice_text = reply_text
         except Exception as exc:
             log.exception("Falha ao processar mensagem do WhatsApp")
             audit.record("whatsapp", "inbound", "error", {"detail": str(exc)})
             reply_text = f"Erro interno ao processar a mensagem: {exc}"
+        # O texto nunca espera a voz: sai primeiro, e a nota de voz vem depois, em segundo plano.
         if client is not None:
             await client.send_text(reply_text)
+        voice_reply = voice_text is not None and client is not None
+        if voice_reply:
+            task = asyncio.create_task(self._send_voice(voice_text))
+            self.voice_tasks.add(task)
+            task.add_done_callback(self.voice_tasks.discard)
         audit.record("whatsapp", "inbound", "replied", {"chars": len(reply_text), "voice": voice_reply})
         return reply_text
 
@@ -203,16 +212,16 @@ class WhatsAppChannel:
                 await client.send_text(SLOW_NOTICE)
         return await task
 
-    async def _send_voice(self, text: str) -> bool:
-        from nickel.speech.tts import wav_to_ogg_opus
+    async def _send_voice(self, text: str) -> None:
+        """Sintetiza e envia a nota de voz; a auditoria (`tts/*`, source "whatsapp") fica em `voice_note`."""
+        from nickel.speech import tts
+
+        async def deliver(wav: Path) -> None:
+            ogg = await tts.wav_to_ogg_opus(wav)
+            if not await self.services.whatsapp.send_voice(ogg):
+                raise RuntimeError("a bridge do WhatsApp não entregou a nota de voz")
 
         try:
-            wav = await self.services.tts.synthesize(text)
-            try:
-                ogg = await wav_to_ogg_opus(wav)
-            finally:
-                wav.unlink(missing_ok=True)
-            return bool(await self.services.whatsapp.send_voice(ogg))
-        except Exception:
-            log.exception("Resposta em áudio falhou; segue só o texto")
-            return False
+            await self.services.voice_note(text, source="whatsapp", deliver=deliver)
+        except Exception:  # voice_note não levanta; isto é só uma rede de segurança
+            log.exception("Resposta em áudio falhou; o texto já foi enviado")
