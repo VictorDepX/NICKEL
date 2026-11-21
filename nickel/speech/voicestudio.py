@@ -73,16 +73,17 @@ class VoiceStudioSpeaker:
         try:
             response = await self._get_client().post("/v1/audio/speech", json=body)
         except httpx.TimeoutException as exc:
-            raise TTSError("VoiceStudio demorou demais para responder.") from exc
+            raise TTSError(
+                "VoiceStudio demorou demais para responder (aumente VOICESTUDIO_TIMEOUT_SECONDS)."
+            ) from exc
         except httpx.HTTPError as exc:
             raise TTSError(f"Não foi possível falar com o VoiceStudio: {type(exc).__name__}.") from exc
         if response.status_code >= 400:
             raise TTSError(f"VoiceStudio ({response.status_code}): {_error_message(response)}")
-        try:
-            with wave.open(io.BytesIO(response.content), "rb"):
-                pass
-        except (wave.Error, EOFError) as exc:
-            raise TTSError("resposta do VoiceStudio não é WAV") from exc
+        if not playback.is_riff_wave(response.content):
+            raise TTSError("resposta do VoiceStudio não é WAV (cabeçalho RIFF/WAVE ausente)")
+        # WAV float/extensível que o `wave` recusa passa: winsound e os players tocam.
+        # Só a concatenação (texto em vários blocos) precisa do `wave`; ela avisa em `_concat_wavs`.
         return response.content
 
     @staticmethod
@@ -98,8 +99,8 @@ class VoiceStudioSpeaker:
                     elif current != params:
                         raise TTSError("formatos de áudio diferentes entre blocos")
                     frames.append(reader.readframes(reader.getnframes()))
-            except wave.Error as exc:
-                raise TTSError("VoiceStudio devolveu um áudio WAV inválido.") from exc
+            except (wave.Error, EOFError) as exc:
+                raise TTSError(f"formato WAV não suportado para concatenação: {exc}") from exc
         assert params is not None
         with wave.open(str(target), "wb") as writer:
             writer.setnchannels(params[0])
@@ -123,7 +124,7 @@ class VoiceStudioSpeaker:
             else:
                 self._concat_wavs(audio, target)
         except BaseException:
-            target.unlink(missing_ok=True)
+            playback.discard(target)
             raise
         return target
 
@@ -142,23 +143,31 @@ class VoiceStudioSpeaker:
                     return
                 await playback.play_wav(wav)
             finally:
-                wav.unlink(missing_ok=True)
+                playback.discard(wav)
 
     def stop(self) -> None:
         self._gen += 1
         playback.stop_playback()
 
     async def health(self) -> dict:
+        """`ok` só se o VoiceStudio responde e tem `VOICESTUDIO_MODEL`. `offline` marca falha de conexão."""
+        model = self.settings.voicestudio_model
         try:
             response = await self._get_client().get("/v1/models")
+            if response.status_code in (401, 403):
+                return {"ok": False, "detail": "configure VOICESTUDIO_API_KEY"}
             if response.status_code >= 400:
                 return {"ok": False, "detail": f"HTTP {response.status_code}"}
-            data = response.json().get("data", [])
-            return {"ok": True, "detail": f"{len(data)} modelos"}
+            payload = response.json()
+            entries = payload.get("data", []) if isinstance(payload, dict) else payload
+            ids = [str(e.get("id")) for e in entries if isinstance(e, dict) and e.get("id")]
+            if model not in ids:
+                return {"ok": False, "detail": f"modelo {model} ausente; disponíveis: {', '.join(ids) or 'nenhum'}"}
+            return {"ok": True, "detail": f"{len(ids)} modelos"}
         except httpx.TimeoutException:
-            return {"ok": False, "detail": "tempo esgotado"}
-        except httpx.HTTPError as exc:
-            return {"ok": False, "detail": f"sem conexão ({type(exc).__name__})"}
+            return {"ok": False, "offline": True, "detail": "tempo esgotado"}
+        except httpx.TransportError as exc:
+            return {"ok": False, "offline": True, "detail": f"sem conexão ({type(exc).__name__})"}
         except Exception as exc:  # health nunca levanta
             return {"ok": False, "detail": f"resposta inválida ({type(exc).__name__})"}
 

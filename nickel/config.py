@@ -108,7 +108,7 @@ class Settings:
     voicestudio_api_key: str = ""
     voicestudio_model: str = "omnivoice"
     voicestudio_voice: str = "default"
-    voicestudio_timeout_seconds: float = 120.0  # a primeira chamada carrega o modelo
+    voicestudio_timeout_seconds: float = 900.0  # renders medidos de 3 a 10 min numa GPU intermediária
     voice_max_seconds: int = 30
     voice_silence_seconds: float = 1.5
     voice_notify: bool = True

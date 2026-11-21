@@ -102,7 +102,7 @@ class PiperSpeaker:
         try:
             await self.play(wav)
         finally:
-            wav.unlink(missing_ok=True)
+            playback.discard(wav)
 
     async def play(self, wav: Path) -> None:
         await playback.play_wav(wav)
@@ -125,4 +125,4 @@ async def wav_to_ogg_opus(wav: Path) -> bytes:
     try:
         return target.read_bytes()
     finally:
-        target.unlink(missing_ok=True)
+        playback.discard(target)

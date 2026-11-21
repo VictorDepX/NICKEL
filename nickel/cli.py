@@ -143,29 +143,40 @@ async def _doctor() -> int:
     vault_ok = bool(settings.obsidian_vault_path and settings.obsidian_vault_path.is_dir())
     line(vault_ok, f"Vault Obsidian ({settings.obsidian_vault_path})", "ajuste OBSIDIAN_VAULT_PATH / Syncthing")
     line(module_available("faster_whisper"), f"faster-whisper (STT {settings.stt_model}, {settings.stt_device})", "pip install -e '.[server]'")
-    if settings.voice_enabled or settings.wa_voice_replies:
-        from nickel.services import resolve_tts_provider
+    # A GUI fala mesmo sem VOICE_ENABLED/WA_VOICE_REPLIES: a voz de saída é sempre checada.
+    from nickel.services import TTS_CHOICES, resolve_tts_provider
 
-        provider = resolve_tts_provider(settings)
-        if provider == "voicestudio":
-            from nickel.speech.voicestudio import VoiceStudioSpeaker
+    choice = (settings.tts_provider or "auto").lower()
+    if choice not in TTS_CHOICES:
+        line(False, f"TTS_PROVIDER inválido: {settings.tts_provider} (use {'|'.join(TTS_CHOICES)})")
+    provider = resolve_tts_provider(settings)
+    if provider == "voicestudio":
+        from nickel.speech.voicestudio import VoiceStudioSpeaker
 
-            speaker = VoiceStudioSpeaker(settings, settings.data_dir / "tmp")
-            try:
-                tts_health = await asyncio.wait_for(speaker.health(), 5)
-            except Exception:
-                tts_health = {"ok": False, "detail": ""}
-            finally:
-                await speaker.aclose()
-            url = settings.voicestudio_url or "http://127.0.0.1:3900"
-            if tts_health.get("ok"):
-                line(True, f"VoiceStudio em {url} (voz: {settings.voicestudio_voice})")
-            else:
-                line(False, f"VoiceStudio em {url}", "abra o app VoiceStudio")
-        elif provider == "piper":
-            line(module_available("piper"), "piper-tts (TTS)", "pip install -e '.[voice]'")
-            voice_ok = bool(settings.tts_voice_path and settings.tts_voice_path.exists())
-            line(voice_ok, f"Voz do Piper ({settings.tts_voice_path})", "baixe a voz (veja o README)")
+        speaker = VoiceStudioSpeaker(settings, settings.data_dir / "tmp")
+        try:
+            tts_health = await asyncio.wait_for(speaker.health(), 5)
+        except Exception:
+            tts_health = {"ok": False, "offline": True, "detail": "sem resposta em 5 s"}
+        finally:
+            await speaker.aclose()
+        url = settings.voicestudio_url or "http://127.0.0.1:3900"
+        if tts_health.get("ok"):
+            line(True, f"VoiceStudio em {url} (voz: {settings.voicestudio_voice})")
+        elif tts_health.get("offline"):
+            line(False, f"VoiceStudio em {url}", "abra o app VoiceStudio")
+        else:
+            line(False, f"VoiceStudio em {url}", tts_health.get("detail") or "resposta inesperada")
+    elif provider == "piper":
+        line(module_available("piper"), "piper-tts (TTS)", "pip install -e '.[voice]'")
+        voice_ok = bool(settings.tts_voice_path and settings.tts_voice_path.exists())
+        line(voice_ok, f"Voz do Piper ({settings.tts_voice_path})", "baixe a voz (veja o README)")
+    elif choice == "none":
+        line(True, "Voz desligada (TTS_PROVIDER=none)")
+    elif choice == "piper":
+        line(False, "Voz", "configure TTS_VOICE_PATH")
+    else:
+        line(False, "Voz", "configure VOICESTUDIO_URL ou TTS_VOICE_PATH")
     if settings.voice_enabled:
         line(module_available("sounddevice"), "sounddevice (microfone)", "pip install -e '.[voice]'")
     if settings.voice_notify:

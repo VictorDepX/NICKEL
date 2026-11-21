@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from nickel.core.agent import Agent, Turn
 from nickel.core.outbound import desktop_notify
 from nickel.core.trace import new_run_id, run_scope
+from nickel.speech.playback import discard
 
 if TYPE_CHECKING:  # pragma: no cover
     from nickel.services import Services
@@ -77,7 +78,7 @@ class VoiceController:
             )
             self._set_state("transcribing")
             text = (await self.services.stt.transcribe(audio)).strip()
-            audio.unlink(missing_ok=True)
+            discard(audio)
             if not text:
                 await self._notify("Não entendi.")
                 return

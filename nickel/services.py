@@ -196,8 +196,13 @@ class Services:
         return self.spotify is not None and not self.spotify.missing_config()
 
 
+TTS_CHOICES = ("auto", "voicestudio", "piper", "none")
+
+
 def resolve_tts_provider(settings: Settings) -> str | None:
-    """`auto` prefere o VoiceStudio (se há URL) e cai no Piper (se há voz); `none` desliga."""
+    """`auto` prefere o VoiceStudio (se há URL) e cai no Piper (se há voz); `none` desliga.
+
+    Valor desconhecido age como `auto` (o `nickel doctor` avisa)."""
     choice = (settings.tts_provider or "auto").lower()
     if choice == "none":
         return None

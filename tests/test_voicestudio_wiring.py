@@ -90,21 +90,65 @@ def test_state_reports_piper_voice_file(services, tmp_path):
     assert run(services.tts_status()) == {"provider": "piper", "ok": True, "detail": "pt.onnx"}
 
 
-def test_doctor_line_for_voicestudio_online_and_offline(monkeypatch, tmp_path, capsys):
+def _doctor_env(monkeypatch, tmp_path, **env):
     monkeypatch.setenv("NICKEL_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("VOICESTUDIO_URL", "http://vs.test")
-    monkeypatch.setenv("VOICESTUDIO_VOICE", "marina")
-    monkeypatch.setenv("VOICE_ENABLED", "true")
+    for key in ("VOICESTUDIO_URL", "TTS_VOICE_PATH", "TTS_PROVIDER", "VOICE_ENABLED", "WA_VOICE_REPLIES"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
     monkeypatch.chdir(tmp_path)  # sem .env
-    for ok in (True, False):
-        async def fake_health(self, ok=ok):
-            return {"ok": ok, "detail": "x"}
 
-        monkeypatch.setattr(VoiceStudioSpeaker, "health", fake_health)
-        main(["doctor"])
-        out = capsys.readouterr().out
-        if ok:
-            assert "[ok] VoiceStudio em http://vs.test (voz: marina)" in out
-        else:
-            assert "[!!] VoiceStudio em http://vs.test — abra o app VoiceStudio" in out
-        assert "Piper" not in out
+
+def _doctor_with_health(monkeypatch, capsys, health) -> str:
+    async def fake_health(self):
+        return health
+
+    monkeypatch.setattr(VoiceStudioSpeaker, "health", fake_health)
+    main(["doctor"])
+    return capsys.readouterr().out
+
+
+def test_doctor_line_for_voicestudio_online_offline_and_detail(monkeypatch, tmp_path, capsys):
+    _doctor_env(monkeypatch, tmp_path, VOICESTUDIO_URL="http://vs.test", VOICESTUDIO_VOICE="marina")
+    out = _doctor_with_health(monkeypatch, capsys, {"ok": True, "detail": "1 modelos"})
+    assert "[ok] VoiceStudio em http://vs.test (voz: marina)" in out
+    assert "Piper" not in out
+
+    out = _doctor_with_health(monkeypatch, capsys, {"ok": False, "offline": True, "detail": "sem conexão"})
+    assert "[!!] VoiceStudio em http://vs.test — abra o app VoiceStudio" in out
+
+    detail = "modelo omnivoice ausente; disponíveis: voxcpm2"
+    out = _doctor_with_health(monkeypatch, capsys, {"ok": False, "detail": detail})
+    assert f"[!!] VoiceStudio em http://vs.test — {detail}" in out
+    assert "abra o app VoiceStudio" not in out
+
+    out = _doctor_with_health(monkeypatch, capsys, {"ok": False, "detail": "configure VOICESTUDIO_API_KEY"})
+    assert "[!!] VoiceStudio em http://vs.test — configure VOICESTUDIO_API_KEY" in out
+
+
+def test_doctor_checks_tts_even_without_voice_or_whatsapp_voice(monkeypatch, tmp_path, capsys):
+    _doctor_env(monkeypatch, tmp_path, VOICESTUDIO_URL="http://vs.test", VOICE_ENABLED="false")
+    out = _doctor_with_health(monkeypatch, capsys, {"ok": True, "detail": "1 modelos"})
+    assert "[ok] VoiceStudio em http://vs.test" in out  # a GUI fala mesmo sem VOICE_ENABLED
+
+
+def test_doctor_warns_when_auto_finds_no_voice(monkeypatch, tmp_path, capsys):
+    _doctor_env(monkeypatch, tmp_path, VOICE_ENABLED="false")
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "[!!] Voz — configure VOICESTUDIO_URL ou TTS_VOICE_PATH" in out
+
+
+def test_doctor_flags_invalid_tts_provider(monkeypatch, tmp_path, capsys):
+    _doctor_env(monkeypatch, tmp_path, TTS_PROVIDER="elevenlabs")
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "[!!] TTS_PROVIDER inválido: elevenlabs (use auto|voicestudio|piper|none)" in out
+
+
+def test_doctor_reports_voice_off_when_provider_none(monkeypatch, tmp_path, capsys):
+    _doctor_env(monkeypatch, tmp_path, TTS_PROVIDER="none", VOICESTUDIO_URL="http://vs.test")
+    main(["doctor"])
+    out = capsys.readouterr().out
+    assert "[ok] Voz desligada (TTS_PROVIDER=none)" in out
+    assert "VoiceStudio em" not in out
