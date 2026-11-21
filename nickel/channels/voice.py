@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from nickel.core.agent import Agent, Turn
 from nickel.core.outbound import desktop_notify
+from nickel.core.trace import new_run_id, run_scope
 
 if TYPE_CHECKING:  # pragma: no cover
     from nickel.services import Services
@@ -58,21 +59,31 @@ class VoiceController:
         if self.services.settings.voice_notify:
             await desktop_notify("NICKEL", body)
 
+    def _set_state(self, state: str, detail: dict[str, object] | None = None) -> None:
+        self.state = state
+        self.services.audit.record("voice", state, state, detail)
+
     async def _session(self) -> None:
+        with run_scope(new_run_id()):
+            await self._run_session()
+
+    async def _run_session(self) -> None:
         settings = self.services.settings
         try:
+            self._set_state("listening")
             await self._notify("Ouvindo…")
             audio = await self.services.recorder.record(
                 self._stop, settings.voice_max_seconds, settings.voice_silence_seconds
             )
-            self.state = "thinking"
+            self._set_state("transcribing")
             text = (await self.services.stt.transcribe(audio)).strip()
             audio.unlink(missing_ok=True)
             if not text:
                 await self._notify("Não entendi.")
                 return
+            self._set_state("thinking", {"chars": len(text)})
             reply = await self.agent.handle(Turn(channel="voice", text=text))
-            self.state = "speaking"
+            self._set_state("speaking")
             await self._notify(reply.text)
             if settings.voice_open_links and reply.links and shutil.which("xdg-open"):
                 await asyncio.create_subprocess_exec("xdg-open", reply.links[0])
@@ -80,6 +91,7 @@ class VoiceController:
                 await self.services.tts.speak(reply.text)
         except Exception as exc:
             log.exception("Sessão de voz falhou")
+            self.services.audit.record("voice", "error", "error", {"detail": str(exc)})
             await self._notify(f"Erro na voz: {exc}")
         finally:
-            self.state = "idle"
+            self._set_state("idle")

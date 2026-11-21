@@ -4,8 +4,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from nickel.core.events import CATALOG, PHASE_LABELS, PHASES, TURN_FLOW, phase_for
 
 ROOT = Path(__file__).resolve().parent.parent / "nickel"
@@ -69,7 +67,6 @@ def test_all_record_calls_use_cataloged_kind_and_status():
     assert not errors, "\n".join(errors)
 
 
-@pytest.mark.xfail(strict=True, reason="fecha na Task 6")
 def test_every_cataloged_kind_is_emitted_somewhere():
     emitted = {k for _, _, k, _ in _calls("record", True) if k}
     emitted |= {k for _, _, k, _ in _calls("emit", False) if k}

@@ -18,7 +18,7 @@ from nickel.core.persona import build_system_prompt
 from nickel.core.reasoning import ReasoningTracker
 from nickel.core.skills import ToolContext, ToolRegistry, ToolResult, validate_arguments
 from nickel.core.stores import PendingAction, StoredMessage
-from nickel.core.trace import new_run_id, run_scope
+from nickel.core.trace import current_run_id, new_run_id, run_scope
 from nickel.core.workspaces import Resolution, Workspace
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -174,10 +174,10 @@ class Agent:
     async def _traced(
         self, channel: str, chars: int, body: Callable[[_TurnStats], Awaitable[AgentReply]]
     ) -> AgentReply:
-        """Roda um turno num `run_scope` próprio, entre `turn/start` e `turn/done` (ou `turn/error`)."""
+        """Roda um turno num `run_scope` (reaproveita o do chamador, se houver), entre `turn/start` e `turn/done` (ou `turn/error`)."""
         audit = self.services.audit
         stats = _TurnStats()
-        with run_scope(new_run_id()):
+        with run_scope(current_run_id.get() or new_run_id()):
             started = time.monotonic()
             audit.record(
                 "turn",

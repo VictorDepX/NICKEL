@@ -25,7 +25,7 @@ def _spec(kind: str, description: str, statuses: tuple[str, ...], fields: tuple[
 CATALOG: dict[str, EventSpec] = dict(
     [
         _spec("oauth", "Conexão de contas externas via OAuth (Google, Spotify).", ("connected",), (), "nickel/app.py"),
-        _spec("whatsapp", "Mensagens recebidas e respondidas pelo canal WhatsApp.", ("received", "replied", "error"), ("type", "id"), "nickel/channels/whatsapp.py"),
+        _spec("whatsapp", "Mensagens recebidas e respondidas pelo canal WhatsApp.", ("received", "replied", "error"), ("type", "id", "chars", "voice", "detail"), "nickel/channels/whatsapp.py"),
         _spec("outbound", "Envio de mensagens proativas por um canal.", ("ok", "undelivered"), ("text",), "nickel/core/outbound.py"),
         _spec("confirmation", "Ciclo de confirmação de ações sensíveis.", ("requested", "confirmed", "cancelled", "dropped"), ("id", "channel"), "nickel/core/agent.py"),
         _spec("tool", "Execução de ferramentas pelo agente.", ("start", "ok", "error"), ("arguments", "summary"), "nickel/core/agent.py"),
@@ -34,8 +34,8 @@ CATALOG: dict[str, EventSpec] = dict(
         _spec("route", "Resolução da rota (workspace/skill) de um turno.", ("resolved",), ("command", "workspace", "switched", "auto"), "nickel/core/agent.py"),
         _spec("prompt", "Montagem do prompt enviado ao modelo.", ("built",), ("messages", "history", "tools", "system_chars", "est_tokens"), "nickel/core/agent.py"),
         _spec("reasoning", "Raciocínio do modelo, parcial e final.", ("progress", "final"), ("text",), "nickel/core/reasoning.py"),
-        _spec("voice", "Estados do pipeline de voz.", ("listening", "transcribing", "thinking", "speaking", "idle", "error"), ("detail",), "nickel/voice"),
-        _spec("system", "Ciclo de vida e saúde do sistema.", ("startup", "shutdown", "health"), ("detail",), "nickel/app.py"),
+        _spec("voice", "Estados do pipeline de voz.", ("listening", "transcribing", "thinking", "speaking", "idle", "error"), ("chars", "detail"), "nickel/channels/voice.py"),
+        _spec("system", "Ciclo de vida e saúde do sistema.", ("startup", "shutdown", "health"), ("version", "llm", "workspace_count", "whatsapp", "google", "spotify", "obsidian", "voice"), "nickel/app.py"),
     ]
 )
 

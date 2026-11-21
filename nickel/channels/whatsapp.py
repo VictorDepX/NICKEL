@@ -14,6 +14,7 @@ import httpx
 
 from nickel.config import Settings
 from nickel.core.agent import Agent, AgentReply, Turn
+from nickel.core.trace import current_run_id, new_run_id, run_scope
 
 if TYPE_CHECKING:  # pragma: no cover
     from nickel.services import Services
@@ -161,8 +162,14 @@ class WhatsAppChannel:
         message_id = str(payload.get("id") or "")
         if message_id and self.services.dedup.seen(message_id):
             return None
-        self.services.audit.record("whatsapp", "inbound", "received", {"type": payload.get("type"), "id": message_id})
+        with run_scope(current_run_id.get() or new_run_id()):
+            return await self._process_inbound(payload, message_id)
+
+    async def _process_inbound(self, payload: dict[str, Any], message_id: str) -> str:
+        audit = self.services.audit
+        audit.record("whatsapp", "inbound", "received", {"type": payload.get("type"), "id": message_id})
         client = self.services.whatsapp
+        voice_reply = False
         try:
             turn = await self.build_turn(payload)
             if isinstance(turn, str):
@@ -175,12 +182,14 @@ class WhatsAppChannel:
                     and turn.last_audio_path is not None
                     and self.services.tts is not None
                 ):
-                    await self._send_voice(reply_text)
+                    voice_reply = await self._send_voice(reply_text)
         except Exception as exc:
             log.exception("Falha ao processar mensagem do WhatsApp")
+            audit.record("whatsapp", "inbound", "error", {"detail": str(exc)})
             reply_text = f"Erro interno ao processar a mensagem: {exc}"
         if client is not None:
             await client.send_text(reply_text)
+        audit.record("whatsapp", "inbound", "replied", {"chars": len(reply_text), "voice": voice_reply})
         return reply_text
 
     async def _run_agent(self, turn: Turn) -> AgentReply:
@@ -194,7 +203,7 @@ class WhatsAppChannel:
                 await client.send_text(SLOW_NOTICE)
         return await task
 
-    async def _send_voice(self, text: str) -> None:
+    async def _send_voice(self, text: str) -> bool:
         from nickel.speech.tts import wav_to_ogg_opus
 
         try:
@@ -203,6 +212,7 @@ class WhatsAppChannel:
                 ogg = await wav_to_ogg_opus(wav)
             finally:
                 wav.unlink(missing_ok=True)
-            await self.services.whatsapp.send_voice(ogg)
+            return bool(await self.services.whatsapp.send_voice(ogg))
         except Exception:
             log.exception("Resposta em áudio falhou; segue só o texto")
+            return False

@@ -23,6 +23,8 @@ from nickel.skills import build_registry
 
 log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "ui" / "static"
+VERSION = "2.0.0"
+HEALTH_TIMEOUT = 3.0  # segundos: teto da consulta de saúde no startup
 
 
 def create_app(
@@ -45,6 +47,43 @@ def create_app(
         pending_tasks.add(task)
         task.add_done_callback(pending_tasks.discard)
 
+    async def _bounded(coro, fallback: dict[str, Any], timeout: float | None) -> dict[str, Any]:
+        if timeout is None:
+            return await coro
+        try:
+            return await asyncio.wait_for(coro, timeout)
+        except Exception as exc:  # offline, lento ou com erro: registra o que houver
+            return {**fallback, "detail": str(exc) or type(exc).__name__}
+
+    async def services_snapshot(timeout: float | None = None) -> dict[str, Any]:
+        """Estado dos serviços (sem tokens/chaves), usado por `/api/state` e por `system/health`."""
+
+        async def llm_health() -> dict[str, Any]:
+            return await services.llm.health() if hasattr(services.llm, "health") else {"ok": True}
+
+        async def wa_health() -> dict[str, Any]:
+            if not services.whatsapp:
+                return {"ready": False, "detail": "BRIDGE_TOKEN ausente"}
+            return await services.whatsapp.health()
+
+        llm_state, wa = await asyncio.gather(
+            _bounded(llm_health(), {"ok": False}, timeout),
+            _bounded(wa_health(), {"ready": False}, timeout),
+        )
+        vault = services.obsidian
+        return {
+            "llm": llm_state,
+            "whatsapp": wa,
+            "google": services.google.status() if services.google else {"status": "disabled"},
+            "spotify": services.spotify.status() if services.spotify else {"status": "disabled"},
+            "obsidian": {
+                "available": bool(vault and vault.available),
+                "notes_dir": settings.obsidian_notes_dir,
+                "vault": str(settings.obsidian_vault_path or ""),
+            },
+            "voice": voice.status(),
+        }
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         stop = asyncio.Event()
@@ -57,9 +96,21 @@ def create_app(
             workers.append(asyncio.create_task(services.reminders.run(stop)))
         if background and services.stt is not None and hasattr(services.stt, "warm_up"):
             workers.append(asyncio.create_task(services.stt.warm_up()))
+        services.audit.record(
+            "system",
+            "nickel",
+            "startup",
+            {
+                "version": VERSION,
+                "llm": f"{settings.llm_provider}:{settings.llm_model}",
+                "workspace_count": len(services.workspaces.all()),
+            },
+        )
+        services.audit.record("system", "nickel", "health", await services_snapshot(HEALTH_TIMEOUT))
         try:
             yield
         finally:
+            services.audit.record("system", "nickel", "shutdown")
             stop.set()
             for task in workers:
                 task.cancel()
@@ -67,7 +118,7 @@ def create_app(
                 if client is not None and hasattr(client, "aclose"):
                     await client.aclose()
 
-    app = FastAPI(title="NICKEL", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="NICKEL", version=VERSION, lifespan=lifespan)
     app.state.services = services
     app.state.agent = agent
     app.state.registry = registry
@@ -87,20 +138,8 @@ def create_app(
 
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
-        llm_health = await services.llm.health() if hasattr(services.llm, "health") else {"ok": True}
-        wa = await services.whatsapp.health() if services.whatsapp else {"ready": False, "detail": "BRIDGE_TOKEN ausente"}
-        vault = services.obsidian
         return {
-            "llm": llm_health,
-            "whatsapp": wa,
-            "google": services.google.status() if services.google else {"status": "disabled"},
-            "spotify": services.spotify.status() if services.spotify else {"status": "disabled"},
-            "obsidian": {
-                "available": bool(vault and vault.available),
-                "notes_dir": settings.obsidian_notes_dir,
-                "vault": str(settings.obsidian_vault_path or ""),
-            },
-            "voice": voice.status(),
+            **await services_snapshot(),
             "music": services.music is not None,
             "tools": [tool.name for tool in registry.available(services)],
             "workspace": services.workspaces.active().id,
