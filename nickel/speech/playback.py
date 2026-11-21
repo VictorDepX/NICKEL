@@ -10,6 +10,11 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+
+class TTSError(RuntimeError):
+    """Falha ao sintetizar ou reproduzir fala."""
+
+
 _PLAYERS = (["pw-play"], ["paplay"], ["aplay", "-q"])
 
 _process: asyncio.subprocess.Process | None = None
@@ -21,11 +26,20 @@ async def play_wav(path: Path) -> None:
     if sys.platform == "win32":
         import winsound
 
-        await asyncio.to_thread(winsound.PlaySound, str(path), winsound.SND_FILENAME)
+        try:
+            await asyncio.to_thread(winsound.PlaySound, str(path), winsound.SND_FILENAME)
+        except asyncio.CancelledError:
+            stop_playback()
+            raise
+        except (RuntimeError, OSError) as exc:
+            raise TTSError(f"Falha ao reproduzir o áudio no Windows: {exc}") from exc
         return
     for player in _PLAYERS:
         if shutil.which(player[0]):
-            process = await asyncio.create_subprocess_exec(*player, str(path))
+            try:
+                process = await asyncio.create_subprocess_exec(*player, str(path))
+            except OSError as exc:
+                raise TTSError(f"Falha ao iniciar o player de áudio ({player[0]}): {exc}") from exc
             _process = process
             try:
                 await process.wait()
@@ -33,7 +47,7 @@ async def play_wav(path: Path) -> None:
                 if _process is process:
                     _process = None
             return
-    log.warning("Nenhum player de áudio encontrado (pw-play, paplay, aplay).")
+    raise TTSError("Nenhum player de áudio encontrado (pw-play, paplay, aplay).")
 
 
 def stop_playback() -> None:
@@ -41,7 +55,10 @@ def stop_playback() -> None:
     if sys.platform == "win32":
         import winsound
 
-        winsound.PlaySound(None, winsound.SND_PURGE)
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except (RuntimeError, OSError):
+            log.warning("Não foi possível interromper o áudio.")
         return
     if _process is not None and _process.returncode is None:
         _process.terminate()

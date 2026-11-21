@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
 import tempfile
@@ -46,7 +45,7 @@ class VoiceStudioSpeaker:
         self.work_dir = work_dir
         self._transport = transport
         self._client: httpx.AsyncClient | None = None
-        self._cancel = asyncio.Event()
+        self._gen = 0
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -79,6 +78,11 @@ class VoiceStudioSpeaker:
             raise TTSError(f"Não foi possível falar com o VoiceStudio: {type(exc).__name__}.") from exc
         if response.status_code >= 400:
             raise TTSError(f"VoiceStudio ({response.status_code}): {_error_message(response)}")
+        try:
+            with wave.open(io.BytesIO(response.content), "rb"):
+                pass
+        except (wave.Error, EOFError) as exc:
+            raise TTSError("resposta do VoiceStudio não é WAV") from exc
         return response.content
 
     @staticmethod
@@ -127,20 +131,21 @@ class VoiceStudioSpeaker:
         pieces = split_for_tts(text, _CHUNK_LIMIT)
         if not pieces:
             return
-        self._cancel.clear()
+        self.stop()  # uma nova fala interrompe a anterior
+        gen = self._gen
         for piece in pieces:
-            if self._cancel.is_set():
+            if self._gen != gen:
                 return
             wav = await self.synthesize(piece)
             try:
-                if self._cancel.is_set():
+                if self._gen != gen:
                     return
                 await playback.play_wav(wav)
             finally:
                 wav.unlink(missing_ok=True)
 
     def stop(self) -> None:
-        self._cancel.set()
+        self._gen += 1
         playback.stop_playback()
 
     async def health(self) -> dict:

@@ -192,3 +192,130 @@ def test_play_wav_uses_first_available_player_on_linux(monkeypatch, tmp_path):
     wav = tmp_path / "a.wav"
     run(playback.play_wav(wav))
     assert launched == [("paplay", str(wav))]
+
+
+def _blocking_play(monkeypatch):
+    import asyncio
+
+    log = []
+    gates = {}
+
+    async def fake_play(path):
+        name = f"w{len(log)}"
+        log.append(name)
+        gate = gates.setdefault(name, asyncio.Event())
+        await gate.wait()
+
+    monkeypatch.setattr(playback, "play_wav", fake_play)
+    monkeypatch.setattr(playback, "stop_playback", lambda: None)
+    return log, gates
+
+
+def _two_speeches(tmp_path, monkeypatch, explicit_stop):
+    import asyncio
+
+    log, gates = _blocking_play(monkeypatch)
+    inputs = []
+
+    def handler(request):
+        inputs.append(json.loads(request.content)["input"])
+        return httpx.Response(200, content=make_wav())
+
+    vs = speaker(tmp_path, handler)
+    long_a = " ".join(f"Alfa {i} frase longa de teste." for i in range(300))
+
+    async def scenario():
+        task_a = asyncio.create_task(vs.speak(long_a))
+        while not log:
+            await asyncio.sleep(0)
+        if explicit_stop:
+            vs.stop()
+        task_b = asyncio.create_task(vs.speak("Beta curta."))
+        await asyncio.sleep(0.05)
+        for gate in list(gates.values()) + [None]:
+            if gate:
+                gate.set()
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            for gate in gates.values():
+                gate.set()
+        await asyncio.gather(task_a, task_b)
+
+    run(scenario())
+    return log, inputs
+
+
+@pytest.mark.parametrize("explicit_stop", [False, True])
+def test_new_speech_interrupts_previous_one(tmp_path, monkeypatch, explicit_stop):
+    log, inputs = _two_speeches(tmp_path, monkeypatch, explicit_stop)
+    a_chunks = [i for i in inputs if i.startswith("Alfa")]
+    assert len(log) == 2  # A tocou só o primeiro bloco; B tocou
+    assert inputs.count("Beta curta.") == 1
+    assert len(a_chunks) == 1  # A nem sintetizou os blocos seguintes
+
+
+def test_stop_playback_terminates_linux_process(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    terminated = []
+
+    class FakeProcess:
+        returncode = None
+
+        def terminate(self):
+            terminated.append(True)
+
+    monkeypatch.setattr(playback, "_process", FakeProcess())
+    playback.stop_playback()
+    assert terminated == [True]
+
+
+def test_playback_failures_become_tts_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(playback.shutil, "which", lambda name: None)
+    with pytest.raises(TTSError, match="player"):
+        run(playback.play_wav(tmp_path / "a.wav"))
+
+    def boom(*a):
+        raise RuntimeError("falhou")
+
+    monkeypatch.setitem(
+        sys.modules, "winsound", types.SimpleNamespace(SND_FILENAME=1, SND_PURGE=2, PlaySound=boom)
+    )
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(TTSError, match="Windows"):
+        run(playback.play_wav(tmp_path / "a.wav"))
+
+
+def test_windows_cancel_purges_playback(monkeypatch, tmp_path):
+    import asyncio
+    import threading
+
+    calls = []
+    release = threading.Event()
+
+    def play_sound(*args):
+        calls.append(args)
+        if args[0] is not None:
+            release.wait(2)
+
+    monkeypatch.setitem(
+        sys.modules, "winsound", types.SimpleNamespace(SND_FILENAME=1, SND_PURGE=2, PlaySound=play_sound)
+    )
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    async def scenario():
+        task = asyncio.create_task(playback.play_wav(tmp_path / "a.wav"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+
+    run(scenario())
+    assert (None, 2) in calls
+
+
+def test_non_wav_response_becomes_tts_error(tmp_path):
+    vs = speaker(tmp_path, lambda r: httpx.Response(200, content=b"nao e wav"))
+    with pytest.raises(TTSError, match="não é WAV"):
+        run(vs.synthesize("oi"))

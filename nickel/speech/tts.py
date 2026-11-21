@@ -12,13 +12,12 @@ from pathlib import Path
 from typing import Protocol
 
 from nickel.speech import playback
+from nickel.speech.playback import TTSError
+
+__all__ = ["PiperSpeaker", "Speaker", "TTSError", "clean_for_speech", "split_for_tts", "wav_to_ogg_opus"]
 
 log = logging.getLogger(__name__)
 
-
-
-class TTSError(RuntimeError):
-    """Falha ao sintetizar ou reproduzir fala."""
 
 
 class Speaker(Protocol):
