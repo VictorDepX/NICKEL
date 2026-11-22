@@ -22,9 +22,23 @@ def app(services):
 
 
 @pytest.fixture
-def client(app):
+def client(app, services):
     with TestClient(app) as test_client:
+        _wait_for_health(services)
         yield test_client
+
+
+def _wait_for_health(services, timeout: float = 5.0) -> None:
+    """O startup grava `system/health` em segundo plano (mesmo com background=False). Sem esperar,
+    ele cai no meio dos eventos semeados pelo teste e muda os ids esperados de forma intermitente."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any((e["kind"], e["status"]) == ("system", "health") for e in services.audit.recent(50)):
+            return
+        time.sleep(0.005)
+    raise AssertionError("system/health não apareceu a tempo")
 
 
 def _parse(body: str) -> list[dict]:
@@ -194,12 +208,14 @@ def test_startup_survives_failing_status_and_still_records_shutdown(services):
 
 
 def test_stream_replay_pages_beyond_500_events(client, services):
-    first = services.audit.record("tool", "bulk", "ok", run_id="big")["id"]
-    for _ in range(1100):
-        services.audit.record("tool", "bulk", "ok", run_id="big")
-    frames = _parse(client.get(f"/api/events/stream?once=true&after={first - 1}").text)
+    # O startup grava `system/health` em segundo plano, que pode cair no meio dos 1101 eventos:
+    # a checagem olha só os ids semeados (todos presentes, em ordem, sem repetição).
+    seeded = [services.audit.record("tool", "bulk", "ok", run_id="big")["id"] for _ in range(1101)]
+    frames = _parse(client.get(f"/api/events/stream?once=true&after={seeded[0] - 1}").text)
     ids = [int(f["id"]) for f in frames]
-    assert len(ids) == 1101 and ids == list(range(first, first + 1101))
+    assert ids == sorted(set(ids))
+    wanted = set(seeded)
+    assert [i for i in ids if i in wanted] == seeded
 
 
 def test_stream_backfills_gap_when_queue_dropped_events(app, services, monkeypatch):
