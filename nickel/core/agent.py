@@ -51,10 +51,10 @@ _FAKE_ACTION_RETRY = (
 )
 
 # Afirmação de ação concluída sem marcador (ex.: "Lembrete #2 criado: Alongar."). Padrão PT-BR estrito,
-# frase a frase: substantivo de recurso + particípio em até 60 caracteres, ou o id `#N` do resumo de tool,
-# ou a primeira pessoa no passado. Não contam: perguntas, frases com negação, futuro, condicional ou modal
-# ("Nenhum lembrete foi criado.", "O lembrete será criado…", "Se o e-mail for enviado…") e frases cujos
-# `#N` já apareceram em resumos de tools do histórico (recapitulação de ação real).
+# oração a oração: substantivo de recurso + particípio em até 60 caracteres, ou o id `#N` do resumo de tool,
+# ou a primeira pessoa no passado. Não contam: perguntas, orações com negação, futuro, condicional ou modal
+# ("Nenhum lembrete foi criado.", "O lembrete será criado…", "Se o e-mail for enviado…") e orações cujos
+# `#N` já apareceram, do mesmo tipo, em resumos de tools do histórico (recapitulação de ação real).
 _RESOURCE = r"(?:lembretes?|mem[óo]rias?|prefer[êe]ncias?|notas?|eventos?|e-?mails?|mensage(?:m|ns)|compromissos?|tarefas?)"
 _PARTICIPLE = r"(?:criad|salv|agendad|enviad|cancelad|apagad|removid|registrad|anotad|marcad)[oa]s?"
 _CLAIM_RE = re.compile(
@@ -69,12 +69,29 @@ _NOT_DONE_RE = re.compile(
 )
 _IDIOMS_RE = re.compile(r"\bpode deixar\b", re.IGNORECASE)  # "pode deixar" confirma, não é modal
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
-_ID_RE = re.compile(r"#(\d+)")
+# Orações: , ; : — (um "e"/"mas"/"porém" depois da vírgula fica no começo da oração seguinte).
+_CLAUSE_SPLIT = re.compile(r"\s*[,;:—]\s*")
+_ID_RE = re.compile(rf"(?:\b({_RESOURCE})\s*)?#(\d+)", re.IGNORECASE)
+# Tools cujos resumos citam `#N` sem o substantivo (ex.: reminder_list: "#2 Café — …").
+_TOOL_NOUN = {"reminder": "lembrete", "notes": "nota", "memory": "memoria", "email": "email", "calendar": "evento"}
 
 
-def known_action_ids(history: list[StoredMessage]) -> set[int]:
-    """Ids `#N` citados nos resumos das tools que rodaram de fato em turnos anteriores."""
-    ids: set[int] = set()
+def _noun_key(noun: str) -> str:
+    """'Lembretes' → 'lembrete', 'Memória' → 'memoria', 'E-mails' → 'email', 'mensagens' → 'mensagem'."""
+    key = unicodedata.normalize("NFKD", noun.lower())
+    key = "".join(ch for ch in key if not unicodedata.combining(ch)).replace("-", "")
+    if key.endswith("ns"):
+        return key[:-2] + "m"
+    return key[:-1] if key.endswith("s") else key
+
+
+def _cited_ids(text: str, default: str | None = None) -> set[tuple[str | None, int]]:
+    return {(_noun_key(noun) if noun else default, int(n)) for noun, n in _ID_RE.findall(text)}
+
+
+def known_action_ids(history: list[StoredMessage]) -> set[tuple[str, int]]:
+    """Pares (tipo, id) citados nos resumos das tools que rodaram de fato em turnos anteriores."""
+    ids: set[tuple[str, int]] = set()
     for item in history:
         if item.role != "assistant":
             continue
@@ -82,22 +99,32 @@ def known_action_ids(history: list[StoredMessage]) -> set[int]:
             if attachment.get("type") != "tools":
                 continue
             for action in attachment.get("items") or []:
-                ids.update(int(n) for n in _ID_RE.findall(str(action.get("summary") or "")))
+                default = _TOOL_NOUN.get(str(action.get("name") or "").split("_", 1)[0])
+                cited = _cited_ids(str(action.get("summary") or ""), default)
+                ids.update((noun, n) for noun, n in cited if noun)
     return ids
 
 
-def claims_unexecuted_action(text: str, known_ids: set[int] | frozenset[int] = frozenset()) -> bool:
-    """Verdadeiro quando alguma frase afirma uma ação concluída (usado só quando nenhuma tool rodou)."""
+def _all_known(cited: set[tuple[str | None, int]], known: set[tuple[str, int]] | frozenset) -> bool:
+    known_numbers = {n for _, n in known}
+    return all((noun, n) in known if noun else n in known_numbers for noun, n in cited)
+
+
+def claims_unexecuted_action(
+    text: str, known_ids: set[tuple[str, int]] | frozenset[tuple[str, int]] = frozenset()
+) -> bool:
+    """Verdadeiro quando alguma oração afirma uma ação concluída (usado só quando nenhuma tool rodou)."""
     for sentence in _SENTENCE_SPLIT.split(text or ""):
         sentence = sentence.strip()
-        if not sentence or sentence.endswith("?") or not _CLAIM_RE.search(sentence):
+        if not sentence or sentence.endswith("?"):
             continue
-        if _NOT_DONE_RE.search(_IDIOMS_RE.sub(" ", sentence)):
-            continue
-        ids = {int(n) for n in _ID_RE.findall(sentence)}
-        if ids and ids <= set(known_ids):
-            continue
-        return True
+        for clause in _CLAUSE_SPLIT.split(sentence):
+            if not _CLAIM_RE.search(clause) or _NOT_DONE_RE.search(_IDIOMS_RE.sub(" ", clause)):
+                continue
+            cited = _cited_ids(clause)
+            if cited and _all_known(cited, known_ids):
+                continue
+            return True
     return False
 
 

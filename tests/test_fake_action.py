@@ -40,6 +40,11 @@ def _fakes(services):
         "Pronto! O compromisso foi agendado para amanhã às 9h.",
         "Lembrete #3: Alongar — sáb 21/11 às 15:11.",
         "PREFERÊNCIA REGISTRADA.",
+        # bloqueio por oração: o "se"/"posso" de outra oração não salva a afirmação
+        "Lembrete criado, se precisar me avise.",
+        "Pronto, lembrete agendado para 15h, qualquer coisa é só falar.",
+        "Memória salva; se quiser, posso listar.",
+        "Criei o lembrete, mas se quiser eu mudo o horário.",
     ],
 )
 def test_claims_unexecuted_action_positives(text):
@@ -79,12 +84,34 @@ def test_claims_unexecuted_action_negatives(text):
 
 
 def test_claims_unexecuted_action_ignores_ids_already_known():
-    known = {1, 2}
+    known = {("lembrete", 1), ("lembrete", 2)}
     assert not claims_unexecuted_action("Seu lembrete #1 foi criado para 15:11.", known)
     assert not claims_unexecuted_action("Lembrete #1: Alongar (sáb 15:11) e Lembrete #2: Café.", known)
     assert claims_unexecuted_action("Lembrete #3 criado: Alongar.", known)  # id novo
     assert claims_unexecuted_action("Lembrete #1 e lembrete #3 criados.", known)  # um dos ids é novo
     assert claims_unexecuted_action("Seu lembrete #1 foi criado para 15:11.")  # sem histórico
+    assert not claims_unexecuted_action("Os lembretes #1 e #2 foram criados.", known)  # plural e id solto
+
+
+def test_known_ids_are_keyed_by_noun_type():
+    known = {("lembrete", 1)}
+    assert claims_unexecuted_action("Nota #1 salva.", known)
+    assert claims_unexecuted_action("E-mail #1 enviado.", known)
+    assert not claims_unexecuted_action("LEMBRETES #1 criado.", known)
+    assert not claims_unexecuted_action("Memória #4 salva.", {("memoria", 4)})  # acento normalizado
+
+
+def test_known_action_ids_reads_tool_summaries_by_type(services):
+    from nickel.core.agent import known_action_ids
+
+    store = services.conversations
+    store.add("assistant", "ok", channel="ui", attachments=[{"type": "tools", "items": [
+        {"name": "reminder_create", "ok": True, "summary": "Lembrete #1: Alongar — sáb 15:11."},
+        {"name": "reminder_list", "ok": True, "summary": "#2 Café — sáb 16:00; #3 Água — sáb 17:00"},
+    ]}])
+    store.add("user", "Lembrete #9 criado", channel="ui")  # mensagem do usuário não conta
+    ids = known_action_ids(store.recent(10))
+    assert ids == {("lembrete", 1), ("lembrete", 2), ("lembrete", 3)}
 
 
 def test_claims_unexecuted_action_patterns():
