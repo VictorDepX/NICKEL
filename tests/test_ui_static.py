@@ -47,7 +47,12 @@ def test_monitor_never_injects_html_and_uses_no_cdn():
     for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
         assert forbidden not in monitor, forbidden
     assert "Baixar relatório" in monitor
-    for text in ("Sem raciocínio expandido (think desligado)", "Aguardando o modelo…", "Nenhum turno ainda."):
+    for text in (
+        "Sem raciocínio expandido (think desligado)",
+        "O modelo não raciocinou neste passo (think ligado)",
+        "Aguardando o modelo…",
+        "Nenhum turno ainda.",
+    ):
         assert text in monitor, text
     for name in ("index.html", "monitor.js", "monitor.css", "app.js"):
         text = (STATIC_DIR / name).read_text(encoding="utf-8")

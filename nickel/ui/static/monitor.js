@@ -130,6 +130,7 @@ const REASONING_EMPTY = {
   empty: "Nenhum turno ainda.",
   waiting: "Aguardando o modelo…",
   off: "Sem raciocínio expandido (think desligado)",
+  skipped: "O modelo não raciocinou neste passo (think ligado)",
   none: "Sem raciocínio neste turno.",
 };
 let selectedStep = null;

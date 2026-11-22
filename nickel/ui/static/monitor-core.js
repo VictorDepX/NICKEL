@@ -14,6 +14,7 @@ export function initialState() {
     reasoningSteps: {},
     llmDone: false,
     lastLlm: null,
+    think: null,
     timeline: [],
     runs: {},
   };
@@ -77,7 +78,8 @@ export function reasoningSteps(state) {
 export function reasoningView(state) {
   if (!state.runId) return "empty";
   if (hasReasoning(state.reasoning)) return "reasoning";
-  if (state.llmDone) return "off";
+  // think ligado e nenhum raciocínio: o modelo pulou (ex.: foi direto à tool). Desconhecido conta como desligado.
+  if (state.llmDone) return state.think === true ? "skipped" : "off";
   if (state.phase === "idle" || state.phase === "error") return "none";
   return "waiting";
 }
@@ -169,6 +171,9 @@ export function applyEvent(state, event, catalog) {
     next.reasoningSteps = {};
     next.llmDone = false;
     next.lastLlm = null;
+    next.think = null;
+  } else if (key === "llm/start") {
+    next.think = typeof detail.think === "boolean" ? detail.think : null;
   } else if (key === "reasoning/progress" || key === "reasoning/final") {
     next.reasoningSteps = updateStep(state.reasoningSteps || {}, key, detail);
     next.reasoning = latestReasoning(next.reasoningSteps);

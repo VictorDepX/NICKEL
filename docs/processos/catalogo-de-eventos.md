@@ -10,7 +10,7 @@ Esta página lista os tipos (`kind`), seus estados, os campos de `detail` e o m�
 | kind | descrição | estados | campos | fonte |
 | --- | --- | --- | --- | --- |
 | `confirmation` | Ciclo de confirmação de ações sensíveis. | `requested`, `confirmed`, `cancelled`, `dropped` | `id`, `channel` | `nickel/core/agent.py` |
-| `llm` | Chamadas ao modelo de linguagem. | `start`, `done`, `error` | `step`, `model`, `backend`, `requested_backend`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `tokens_per_second`, `tool_calls`, `detail` | `nickel/core/agent.py` |
+| `llm` | Chamadas ao modelo de linguagem. | `start`, `done`, `error` | `step`, `model`, `backend`, `requested_backend`, `think`, `duration_ms`, `prompt_tokens`, `completion_tokens`, `tokens_per_second`, `tool_calls`, `detail` | `nickel/core/agent.py` |
 | `oauth` | Conexão de contas externas via OAuth (Google, Spotify). | `connected` | - | `nickel/app.py` |
 | `outbound` | Envio de mensagens proativas por um canal. | `ok`, `undelivered` | `text` | `nickel/core/outbound.py` |
 | `prompt` | Montagem do prompt enviado ao modelo. | `built` | `messages`, `history`, `tools`, `system_chars`, `est_tokens` | `nickel/core/agent.py` |

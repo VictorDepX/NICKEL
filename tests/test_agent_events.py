@@ -99,6 +99,7 @@ def test_turn_emits_ordered_events_with_single_run_id(services, llm, registry):
         "model": services.settings.llm_model,
         "backend": "local",
         "requested_backend": "local",
+        "think": False,
     }
     first_done = events[4]["detail"]
     assert first_done["step"] == 0 and first_done["tool_calls"] == ["echo"]
@@ -340,7 +341,7 @@ def test_llm_events_name_the_cloud_model_when_cloud_backend_is_used(services, ll
     run(Agent(services, registry).handle(Turn(channel="ui", text="/pesado oi")))
     start = _only(_events(services), "llm", "start")[0]
     assert start["name"] == "modelo-nuvem"
-    assert start["detail"] == {"step": 0, "model": "modelo-nuvem", "backend": "cloud", "requested_backend": "cloud"}
+    assert start["detail"] == {"step": 0, "model": "modelo-nuvem", "backend": "cloud", "requested_backend": "cloud", "think": False}
 
 
 def test_cloud_workspace_without_cloud_client_records_local_backend(services, llm, registry, settings):
@@ -358,6 +359,7 @@ def test_cloud_workspace_without_cloud_client_records_local_backend(services, ll
         "model": services.settings.llm_model,
         "backend": "local",
         "requested_backend": "cloud",
+        "think": False,
     }
 
 

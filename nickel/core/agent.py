@@ -45,6 +45,29 @@ _FAKE_ACTION_MARKER = re.compile(
     re.IGNORECASE,
 )
 _FAKE_ACTION_WARNING = "(Atenção: nenhuma ação foi executada.)"
+_FAKE_ACTION_RETRY = (
+    "Sistema: sua última resposta afirmou uma ação, mas nenhuma ferramenta foi chamada e nada foi executado. "
+    "Se a ação é necessária, chame a ferramenta agora. Se não, responda sem afirmar que fez algo."
+)
+
+# Afirmação de ação concluída sem marcador (ex.: "Lembrete #2 criado: Alongar."). Padrão PT-BR estrito:
+# substantivo de recurso + particípio em até 60 caracteres na mesma frase, ou o id `#N` do resumo de tool,
+# ou a primeira pessoa no passado. Futuro, condicional e negação no meio ("será criado") não contam.
+_RESOURCE = r"(?:lembretes?|mem[óo]rias?|prefer[êe]ncias?|notas?|eventos?|e-?mails?|mensage(?:m|ns)|compromissos?|tarefas?)"
+_PARTICIPLE = (
+    r"(?:criad|salv|agendad|enviad|cancelad|apagad|removid|registrad|anotad|marcad)[oa]s?"
+)
+_NOT_DONE = r"\b(?:ser|ser[áa]|ser[ãa]o|seria|seriam|vai|v[ãa]o|pode|podem|posso|quer|deseja|n[ãa]o)\b"
+_CLAIM_RE = re.compile(
+    rf"\b{_RESOURCE}\b(?:\s*#\d+|(?:(?!{_NOT_DONE})[^.!?\n]){{0,60}}?\b{_PARTICIPLE}\b)"
+    r"|(?<!\bn[ãa]o\s)\b(?:criei|salvei|agendei|enviei|cancelei|apaguei|removi|anotei|marquei|registrei)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_unexecuted_action(text: str) -> bool:
+    """Verdadeiro quando o texto afirma uma ação concluída (usado só quando nenhuma tool rodou)."""
+    return bool(text) and _CLAIM_RE.search(text) is not None
 
 
 def strip_fake_action_marker(text: str) -> str:
@@ -382,6 +405,9 @@ class Agent:
         if turn.think is not None:
             options["think"] = turn.think
         extra: dict[str, Any] = {"options": options} if options else {}
+        # O mesmo valor que os clientes mandam ao servidor (`options.get("think", settings.llm_think)`).
+        think = options.get("think", settings.llm_think)
+        retried = False
 
         for step in range(settings.agent_max_steps):
             stats.steps = step + 1
@@ -389,7 +415,13 @@ class Agent:
                 "llm",
                 model,
                 "start",
-                {"step": step, "model": model, "backend": backend, "requested_backend": workspace.backend},
+                {
+                    "step": step,
+                    "model": model,
+                    "backend": backend,
+                    "requested_backend": workspace.backend,
+                    "think": think,
+                },
             )
             tracker = ReasoningTracker(self.services.audit, step=step, tool_names=tool_names) if stream else None
             call_extra = {**extra, "on_delta": tracker.feed} if tracker is not None else extra
@@ -421,7 +453,20 @@ class Agent:
                 fallback = "Feito." if executed else "Sem resposta do modelo."
                 text = reply.content or fallback
                 cleaned = strip_fake_action_marker(text)
-                if cleaned != text and not executed:  # afirmou ação sem chamar a tool
+                faked = not executed and (cleaned != text or claims_unexecuted_action(cleaned))
+                if faked and not retried and step + 1 < settings.agent_max_steps:
+                    # Uma nova tentativa por turno; o pedido não vai para o histórico gravado.
+                    retried = True
+                    self.services.audit.record(
+                        "tool",
+                        "<fake>",
+                        "error",
+                        {"detail": "modelo afirmou ação sem chamar a ferramenta; pedindo nova tentativa"},
+                    )
+                    messages.append({"role": "assistant", "content": cleaned})
+                    messages.append({"role": "user", "content": _FAKE_ACTION_RETRY})
+                    continue
+                if faked:  # afirmou ação sem chamar a tool, e persistiu
                     self.services.audit.record(
                         "tool", "<fake>", "error", {"detail": "modelo afirmou ação sem chamar a ferramenta"}
                     )

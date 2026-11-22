@@ -301,6 +301,47 @@ test("reasoningView: sem turno, aguardando, think desligado e com raciocínio", 
   assert.equal(reasoningView(after), "reasoning");
 });
 
+test("reasoningView: think ligado sem raciocínio é skipped, desligado ou desconhecido é off", () => {
+  nextId = 1;
+  const start = (think) => {
+    let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+    const detail = { step: 0 };
+    if (think !== undefined) detail.think = think;
+    s = applyEvent(s, ev("llm", "start", { detail }), catalog);
+    return s;
+  };
+  const done = (s) => applyEvent(s, ev("llm", "done", { detail: { step: 0 } }), catalog);
+  assert.equal(start(true).think, true);
+  assert.equal(reasoningView(start(true)), "waiting");
+  assert.equal(reasoningView(done(start(true))), "skipped");
+  assert.equal(reasoningView(done(start(false))), "off");
+  assert.equal(reasoningView(done(start(null))), "off");
+  assert.equal(reasoningView(done(start())), "off");
+  // com raciocínio, continua "reasoning" mesmo com think ligado
+  let s = start(true);
+  s = applyEvent(s, ev("reasoning", "progress", { detail: { step: 0, tail: "abc", chars: 3 } }), catalog);
+  assert.equal(reasoningView(done(s)), "reasoning");
+});
+
+test("turn/start zera o think do turno anterior", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+  s = applyEvent(s, ev("llm", "start", { detail: { step: 0, think: true } }), catalog);
+  s = applyEvent(s, ev("turn", "start"), catalog);
+  assert.equal(s.think, null);
+  s = applyEvent(s, ev("llm", "done", { detail: { step: 0 } }), catalog);
+  assert.equal(reasoningView(s), "off");
+});
+
+test("o último llm/start do turno define o think", () => {
+  nextId = 1;
+  let s = applyEvent(initialState(), ev("turn", "start"), catalog);
+  s = applyEvent(s, ev("llm", "start", { detail: { step: 0, think: false } }), catalog);
+  s = applyEvent(s, ev("llm", "start", { detail: { step: 1, think: true } }), catalog);
+  s = applyEvent(s, ev("llm", "done", { detail: { step: 1 } }), catalog);
+  assert.equal(reasoningView(s), "skipped");
+});
+
 test("turn/start zera lastLlm", () => {
   nextId = 1;
   let s = applyEvent(initialState(), ev("llm", "done", { detail: { tokens_per_second: 40 } }), catalog);

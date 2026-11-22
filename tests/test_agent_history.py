@@ -113,7 +113,8 @@ def test_strip_fake_action_marker_variants():
 
 
 def test_reply_with_marker_but_no_tool_is_flagged(services, llm, registry):
-    llm.queue(say("Lembrete #2 criado.\n[ações executadas: reminder_create: Lembrete #2]"))
+    marked = say("Lembrete #2 criado.\n[ações executadas: reminder_create: Lembrete #2]")
+    llm.queue(marked, say("Lembrete #2 criado.\n[ações executadas: reminder_create: Lembrete #2]"))
     reply = run(Agent(services, registry).handle(Turn(channel="ui", text="me lembre de alongar")))
     assert MARKER not in reply.text
     assert reply.text == f"Lembrete #2 criado.\n{WARNING}"
@@ -121,10 +122,11 @@ def test_reply_with_marker_but_no_tool_is_flagged(services, llm, registry):
     assert stored.content == reply.text
     events = services.audit.since(0)
     fake = [e for e in events if e["kind"] == "tool" and e["name"] == "<fake>"]
-    assert len(fake) == 1 and fake[0]["status"] == "error"
-    assert fake[0]["detail"] == {"detail": "modelo afirmou ação sem chamar a ferramenta"}
+    assert len(fake) == 2 and {e["status"] for e in fake} == {"error"}  # nova tentativa, depois o aviso
+    assert fake[-1]["detail"] == {"detail": "modelo afirmou ação sem chamar a ferramenta"}
     pairs = [(e["kind"], e["status"]) for e in events]
     assert pairs.index(("tool", "error")) < pairs.index(("turn", "done"))
+    assert _no_marker(_sent(llm))
 
 
 def test_reply_with_marker_after_real_tool_is_only_stripped(services, llm, registry):
