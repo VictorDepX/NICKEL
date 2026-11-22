@@ -152,3 +152,12 @@ def test_doctor_reports_voice_off_when_provider_none(monkeypatch, tmp_path, caps
     out = capsys.readouterr().out
     assert "[ok] Voz desligada (TTS_PROVIDER=none)" in out
     assert "VoiceStudio em" not in out
+
+
+def test_tts_status_default_timeout_tolerates_slow_voicestudio_models_endpoint():
+    """O /v1/models do VoiceStudio real levou ~2,4 s no PC; o teto padrão precisa ficar acima disso."""
+    import inspect
+
+    from nickel.services import Services
+
+    assert inspect.signature(Services.tts_status).parameters["timeout"].default >= 5.0

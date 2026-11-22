@@ -93,7 +93,7 @@ class Services:
             workspaces=WorkspaceManager.from_settings(settings, state),
         )
 
-    async def tts_status(self, *, ttl: float = 30.0, timeout: float = 2.0) -> dict[str, Any]:
+    async def tts_status(self, *, ttl: float = 30.0, timeout: float = 6.0) -> dict[str, Any]:
         """Estado da voz de saída para `/api/state`: cache de `ttl` s e nunca espera mais que `timeout` s."""
         provider = self.tts_provider if self.tts is not None else None
         if self.tts is not None and provider is None:
