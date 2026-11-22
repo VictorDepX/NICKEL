@@ -1,4 +1,6 @@
-# Modelo local no Windows (llama.cpp + Qwen3.6-35B-A3B)
+# Modelo local no Windows (llama.cpp + Gemma 4 26B-A4B)
+
+> Em 2026-11-22 o modelo local passou do Qwen3.6-35B-A3B para o **Gemma 4 26B-A4B** (IQ4_XS, 13,2 GB). Com o Qwen (18,4 GB) e o VoiceStudio abertos sobravam 0,3 GB de RAM e o Windows paginava; com o Gemma sobram ~3,2 GB.
 
 Guia do [ADR-0003](../adr/0003-workspaces-e-modelo-local.md). Roda o modelo no seu PC (RX 6600 de 8 GB, 24 GB de RAM) e o NICKEL fala com ele por `LLM_PROVIDER=llamacpp`.
 
@@ -6,7 +8,7 @@ Guia do [ADR-0003](../adr/0003-workspaces-e-modelo-local.md). Roda o modelo no s
 
 ## O que roda
 
-- `llama-server` (llama.cpp, backend **Vulkan**): carrega `Qwen3.6-35B-A3B` em `IQ4_XS` (~17,7 GB). Os pesos dos experts MoE ficam na RAM e a GPU guarda atenção e camadas fixas.
+- `llama-server` (llama.cpp, backend **Vulkan**): carrega `gemma-4-26B-A4B-it` em `IQ4_XS` (~13,2 GB). Os pesos dos experts MoE ficam na RAM e a GPU guarda atenção e camadas fixas.
 - NICKEL (Python): `nickel serve` ou `nickel chat`, apontando para `http://127.0.0.1:8080/v1`.
 
 ## 1. Baixar o llama.cpp
@@ -23,7 +25,7 @@ Baixa o build `bin-win-vulkan-x64` da última release para `%LOCALAPPDATA%\llama
 .\scripts\windows\get-model.ps1 -WithVision
 ```
 
-Grava em `%USERPROFILE%\models` o `Qwen_Qwen3.6-35B-A3B-IQ4_XS.gguf` e, com `-WithVision`, o `mmproj-…-f16.gguf` (necessário para fotos no WhatsApp; ocupa memória extra). O download retoma se cair. Outras quantizações: `-Quant Q4_K_M` (~20,7 GB, no limite dos 24 GB) ou `-Quant IQ3_M` se a RAM faltar.
+Grava em `D:\models` o `google_gemma-4-26B-A4B-it-IQ4_XS.gguf` e, com `-WithVision`, o `mmproj-…-f16.gguf` (necessário para fotos no WhatsApp; ocupa memória extra). O download retoma se cair. Outras quantizações: `-Quant Q4_K_M` (~15,9 GB) ou `-Quant IQ3_M` (~12,4 GB) se a RAM faltar.
 
 ## 3. Subir o servidor
 
@@ -58,7 +60,7 @@ No `.env`:
 ```ini
 LLM_PROVIDER=llamacpp
 LLM_BASE_URL=http://127.0.0.1:8080/v1
-LLM_MODEL=qwen3.6-35b-a3b
+LLM_MODEL=gemma-4-26b-a4b
 LLM_THINK=false
 LLM_TIMEOUT_SECONDS=300
 LLM_MAX_TOKENS=1500
@@ -99,3 +101,11 @@ Atalho global de voz, notificações do sistema, serviços de fundo e `install.s
 - **Respostas sem ferramentas:** confirme `--jinja` nos argumentos impressos pelo `start-llama.ps1`.
 - **Timeout:** aumente `LLM_TIMEOUT_SECONDS`; com `think: true` a geração cresce em milhares de tokens.
 - **Workspace não aparece:** o arquivo precisa terminar em `.md`, não começar com `_` e não se chamar `README.md`.
+
+## Medições do Gemma 4 26B-A4B (RX 6600 8 GB, 20 GB de RAM)
+
+| Configuração | Geração | Prefill (2.281 tokens) | VRAM | RAM livre |
+|---|---|---|---|---|
+| IQ4_XS, `--n-cpu-moe 20`, `--load-mode none`, ctx 16k, VoiceStudio aberto | ~19 tok/s | ~126 tok/s | ~7,5 GB | ~3,2 GB |
+
+O raciocínio liga pelo mesmo `chat_template_kwargs.enable_thinking` e chega em `reasoning_content`. Em pedidos que viram chamada de ferramenta direta o modelo costuma pular o raciocínio.

@@ -1,24 +1,24 @@
 ﻿<#
 .SYNOPSIS
-  Sobe o llama-server (llama.cpp, Vulkan) com o Qwen3.6-35B-A3B para o NICKEL.
+  Sobe o llama-server (llama.cpp, Vulkan) com o Gemma 4 26B-A4B para o NICKEL.
 .DESCRIPTION
   O modelo é MoE: os pesos dos experts ficam na RAM e só atenção/camadas fixas ocupam a VRAM.
-  -NCpuMoe 30 (padrão) mantém na RAM os experts das 30 primeiras camadas e leva o resto para a GPU.
-  Medido numa RX 6600 8 GB + 20 GB RAM: ~21 tok/s de geração e ~190 tok/s de prefill. Use -NCpuMoe -1 (--cpu-moe) se faltar VRAM.
+  -NCpuMoe 20 (padrão) mantém na RAM os experts das 20 primeiras camadas e leva o resto para a GPU.
+  Medido numa RX 6600 8 GB + 20 GB RAM: ~19 tok/s de geração e ~126 tok/s de prefill, VRAM ~7,5 GB. Use -NCpuMoe -1 (--cpu-moe) se faltar VRAM.
   Sem mmap é o padrão (-Mmap liga). -NoMmap ainda é aceito, mas é obsoleto e não muda nada.
 .EXAMPLE
   .\start-llama.ps1
-  .\start-llama.ps1 -NCpuMoe 30 -Ctx 8192 -Vision
+  .\start-llama.ps1 -NCpuMoe 22 -Ctx 8192 -Vision
 #>
 param(
     [string]$LlamaDir = "$env:LOCALAPPDATA\llama.cpp",
-    [string]$Model = "$env:USERPROFILE\models\Qwen_Qwen3.6-35B-A3B-IQ4_XS.gguf",
-    [string]$Mmproj = "$env:USERPROFILE\models\mmproj-Qwen_Qwen3.6-35B-A3B-f16.gguf",
+    [string]$Model = "D:\models\google_gemma-4-26B-A4B-it-IQ4_XS.gguf",
+    [string]$Mmproj = "D:\models\mmproj-google_gemma-4-26B-A4B-it-f16.gguf",
     [switch]$Vision,
     [int]$Ctx = 16384,
     [int]$Port = 8080,
-    [string]$Alias = "qwen3.6-35b-a3b",
-    [int]$NCpuMoe = 30,
+    [string]$Alias = "gemma-4-26b-a4b",
+    [int]$NCpuMoe = 20,
     [int]$Threads = 0,
     [switch]$KvQuant,
     [switch]$Mmap,

@@ -1,22 +1,22 @@
 ﻿<#
 .SYNOPSIS
-  Baixa o Qwen3.6-35B-A3B em GGUF (repositório bartowski) e, opcionalmente, o arquivo de visão (mmproj).
+  Baixa o Gemma 4 26B-A4B (instruct) em GGUF (repositório bartowski) e, opcionalmente, o arquivo de visão (mmproj).
 .DESCRIPTION
-  IQ4_XS (~17,7 GB) é o padrão para 24 GB de RAM. Q4_K_M (~20,7 GB) tende a faltar memória com o Windows aberto.
+  IQ4_XS (~13,2 GB) é o padrão para 20 GB de RAM. Q4_K_M (~15,9 GB) deixa pouca RAM com o VoiceStudio aberto.
   O download pode ser retomado: rode o comando de novo se a conexão cair.
 #>
 param(
-    [string]$Dest = "$env:USERPROFILE\models",
+    [string]$Dest = "D:\models",
     [ValidateSet("IQ4_XS", "IQ4_NL", "Q4_K_S", "Q4_K_M", "IQ3_XXS", "IQ3_M")]
     [string]$Quant = "IQ4_XS",
     [switch]$WithVision
 )
 $ErrorActionPreference = "Stop"
-$repo = "https://huggingface.co/bartowski/Qwen_Qwen3.6-35B-A3B-GGUF/resolve/main"
+$repo = "https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main"
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 
-$files = @("Qwen_Qwen3.6-35B-A3B-$Quant.gguf")
-if ($WithVision) { $files += "mmproj-Qwen_Qwen3.6-35B-A3B-f16.gguf" }
+$files = @("google_gemma-4-26B-A4B-it-$Quant.gguf")
+if ($WithVision) { $files += "mmproj-google_gemma-4-26B-A4B-it-f16.gguf" }
 
 foreach ($name in $files) {
     $target = Join-Path $Dest $name

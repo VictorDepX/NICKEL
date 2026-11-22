@@ -7,7 +7,7 @@
 #>
 param(
     [int]$Port = 8080,
-    [string]$Model = "qwen3.6-35b-a3b",
+    [string]$Model = "gemma-4-26b-a4b",
     [int]$LongPromptWords = 1500,
     [int]$GenerateTokens = 128
 )

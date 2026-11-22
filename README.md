@@ -19,7 +19,7 @@ UI local ─┘        │                           └─ Gmail / Google Agend
 |---|---|---|---|
 | **Servidor** (em uso) | VM ARM grátis da Oracle, 24 h | RunPod Serverless (vLLM), pago por segundo | [`docs/deploy/oracle-runpod.md`](docs/deploy/oracle-runpod.md) |
 | **Local (Linux)** | Linux com GPU NVIDIA de 24 GB | Ollama na mesma máquina | Seção abaixo |
-| **Local (Windows)** | PC Windows (8 GB de VRAM, 20 GB de RAM) | `llama-server` com Qwen3.6-35B-A3B (MoE) | [`docs/deploy/local-windows-llamacpp.md`](docs/deploy/local-windows-llamacpp.md) |
+| **Local (Windows)** | PC Windows (8 GB de VRAM, 20 GB de RAM) | `llama-server` com Gemma 4 26B-A4B (MoE) | [`docs/deploy/local-windows-llamacpp.md`](docs/deploy/local-windows-llamacpp.md) |
 
 Voz falada pelo VoiceStudio (OmniVoice): [`docs/deploy/voicestudio.md`](docs/deploy/voicestudio.md).
 
