@@ -478,3 +478,25 @@ test("eventHint resume os eventos de fala", () => {
   assert.equal(eventHint(ev("tts", "done", { detail: { chars: 42, interrupted: true } })), "42 caracteres · interrompida");
   assert.equal(eventHint(ev("tts", "error", { detail: { source: "ui", detail: "voz ocupada" } })), "voz ocupada");
 });
+
+test("nota de voz pulada (tts/skipped) não encerra a fala da GUI nem vira Erro", () => {
+  nextId = 1;
+  const cat = { phases: { ...ttsCatalog.phases } }; // tts/skipped não tem fase
+  let s = initialState();
+  const start = ev("tts", "start", { detail: { source: "ui", provider: "voicestudio", voice: "v", chars: 5 } });
+  s = applyEvent(s, start, cat);
+  assert.equal(s.phase, "speaking");
+  assert.equal(speechSignal(start), "start");
+
+  const skipped = ev("tts", "skipped", { detail: { source: "whatsapp", detail: "voz ocupada" } });
+  s = applyEvent(s, skipped, cat);
+  assert.equal(s.phase, "speaking");
+  assert.equal(speechSignal(skipped), null); // "Parar" continua visível
+  assert.ok(s.timeline.includes(skipped));
+  assert.equal(eventHint(skipped), "voz ocupada");
+
+  const done = ev("tts", "done", { detail: { chars: 5 } });
+  s = applyEvent(s, done, cat);
+  assert.equal(s.phase, "idle");
+  assert.equal(speechSignal(done), "end");
+});

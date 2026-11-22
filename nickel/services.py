@@ -151,14 +151,15 @@ class Services:
         """Sintetiza `text` num WAV e o entrega a `deliver` (ex.: nota de voz do WhatsApp), com a
         mesma auditoria de `speak`. Nunca levanta; devolve a mensagem de erro ou None.
 
-        Não disputa a voz: com uma fala ativa, desiste e registra `tts/error` "voz ocupada".
+        Não disputa a voz: com uma fala ativa, desiste e registra `tts/skipped` "voz ocupada".
         Enquanto sintetiza, ocupa a vez (`_speech`): uma fala nova ou "Parar" a cancela.
         """
         if self.tts is None:
             self.audit.record("tts", "tts", "error", {"source": source, "detail": VOICE_OFF})
             return VOICE_OFF
         if self.speaking():
-            self.audit.record("tts", self._provider_name(), "error", {"source": source, "detail": VOICE_BUSY})
+            # `skipped`, não `error`: a fala em curso não terminou nem falhou (a GUI mantém "Parar").
+            self.audit.record("tts", self._provider_name(), "skipped", {"source": source, "detail": VOICE_BUSY})
             return VOICE_BUSY
         tts = self.tts
 

@@ -189,7 +189,8 @@ def test_voice_controller_speaks_through_services_speak(services, llm):
 
 def test_catalog_has_tts_and_phase_mapping():
     spec = CATALOG["tts"]
-    assert spec.statuses == ("start", "done", "error")
+    assert spec.statuses == ("start", "done", "error", "skipped")
+    assert ("tts", "skipped") not in PHASES  # nota pulada não muda a fase
     assert {"source", "chars", "provider", "voice", "detail"} <= set(spec.fields)
     assert PHASES[("tts", "start")] == "speaking"
     assert PHASES[("tts", "done")] == "idle"
@@ -448,9 +449,11 @@ def test_whatsapp_voice_note_is_skipped_while_gui_speaks(services, llm, monkeypa
     assert services.whatsapp.sent == ["Agora não dá para falar."]
     assert speaker.synth == [] and services.whatsapp.voice == []
     events = _tts(services)
-    busy = [e for e in events if e["status"] == "error"]
+    # Pular a nota não é erro nem fim de fala: a GUI segue em "Falando" com "Parar" visível.
+    busy = [e for e in events if e["status"] == "skipped"]
     assert busy[0]["detail"] == {"source": "whatsapp", "detail": "voz ocupada"}
-    assert [e["status"] for e in events] == ["start", "error", "done"]
+    assert [e["status"] for e in events] == ["start", "skipped", "done"]
+    assert ("tts", "skipped") not in PHASES
 
 
 def test_gui_speech_takes_over_a_pending_voice_note(services, llm, monkeypatch, tmp_path):

@@ -126,6 +126,7 @@ function withoutOlderProgress(timeline, event) {
 
 // Sinal de fala para a GUI: "start" mostra "Parar"; "end" (tts/done ou tts/error) esconde.
 // Independe da fase: um tts/error sem tts/start (voz desligada) não muda a fase, mas encerra a fala.
+// tts/skipped (nota de voz do WhatsApp pulada porque já havia fala) não é fim de fala: devolve null.
 export function speechSignal(event) {
   if (!event || event.kind !== "tts") return null;
   if (event.status === "start") return "start";
@@ -346,7 +347,8 @@ export function eventHint(e) {
     case "turn/done": return [d.steps != null && `${d.steps} passos`, d.reply_chars != null && `${num(d.reply_chars)} caracteres`].filter(Boolean).join(" · ");
     case "tts/start": return [d.provider, d.voice, d.chars != null && `${num(d.chars)} caracteres`].filter(Boolean).join(" · ");
     case "tts/done": return [d.chars != null && `${num(d.chars)} caracteres`, d.interrupted && "interrompida"].filter(Boolean).join(" · ");
-    case "tts/error": return d.detail || "";
+    case "tts/error":
+    case "tts/skipped": return d.detail || "";
     default: return d.detail || "";
   }
 }

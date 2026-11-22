@@ -18,7 +18,7 @@ Esta página lista os tipos (`kind`), seus estados, os campos de `detail` e o m�
 | `route` | Resolução da rota (workspace/skill) de um turno. | `resolved` | `command`, `workspace`, `switched`, `auto` | `nickel/core/agent.py` |
 | `system` | Ciclo de vida e saúde do sistema. | `startup`, `shutdown`, `health` | `version`, `llm`, `workspace_count`, `whatsapp`, `google`, `spotify`, `obsidian`, `voice` | `nickel/app.py` |
 | `tool` | Execução de ferramentas pelo agente. | `start`, `ok`, `error` | `arguments`, `summary`, `detail` | `nickel/core/agent.py` |
-| `tts` | Fala (síntese e reprodução) de uma resposta: GUI, voz e botão Ouvir. | `start`, `done`, `error` | `source`, `chars`, `provider`, `voice`, `interrupted`, `detail` | `nickel/services.py` |
+| `tts` | Fala (síntese e reprodução) de uma resposta: GUI, voz, botão Ouvir e nota de voz do WhatsApp; `skipped` = nota de voz pulada porque já havia uma fala. | `start`, `done`, `error`, `skipped` | `source`, `chars`, `provider`, `voice`, `interrupted`, `detail` | `nickel/services.py` |
 | `turn` | Ciclo completo de um turno de conversa. | `start`, `done`, `error` | `channel`, `workspace`, `chars`, `duration_ms`, `steps`, `reply_chars`, `detail` | `nickel/core/agent.py` |
 | `voice` | Estados do pipeline de voz. | `listening`, `transcribing`, `thinking`, `speaking`, `idle`, `error` | `chars`, `detail` | `nickel/channels/voice.py` |
 | `whatsapp` | Mensagens recebidas e respondidas pelo canal WhatsApp. | `received`, `replied`, `error` | `type`, `id`, `chars`, `voice`, `detail` | `nickel/channels/whatsapp.py` |

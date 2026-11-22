@@ -35,7 +35,7 @@ CATALOG: dict[str, EventSpec] = dict(
         _spec("prompt", "Montagem do prompt enviado ao modelo.", ("built",), ("messages", "history", "tools", "system_chars", "est_tokens"), "nickel/core/agent.py"),
         _spec("reasoning", "Raciocínio do modelo (parcial e final) e o início da resposta.", ("progress", "answering", "final"), ("step", "chars", "tokens_est", "headline", "tail", "content_chars", "text", "conclusion", "tools_mentioned"), "nickel/core/reasoning.py"),
         _spec("voice", "Estados do pipeline de voz.", ("listening", "transcribing", "thinking", "speaking", "idle", "error"), ("chars", "detail"), "nickel/channels/voice.py"),
-        _spec("tts", "Fala (síntese e reprodução) de uma resposta: GUI, voz e botão Ouvir.", ("start", "done", "error"), ("source", "chars", "provider", "voice", "interrupted", "detail"), "nickel/services.py"),
+        _spec("tts", "Fala (síntese e reprodução) de uma resposta: GUI, voz, botão Ouvir e nota de voz do WhatsApp; `skipped` = nota de voz pulada porque já havia uma fala.", ("start", "done", "error", "skipped"), ("source", "chars", "provider", "voice", "interrupted", "detail"), "nickel/services.py"),
         _spec("system", "Ciclo de vida e saúde do sistema.", ("startup", "shutdown", "health"), ("version", "llm", "workspace_count", "whatsapp", "google", "spotify", "obsidian", "voice"), "nickel/app.py"),
     ]
 )
