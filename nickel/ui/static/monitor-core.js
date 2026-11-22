@@ -254,7 +254,8 @@ export function runSummary(events) {
   };
   for (const e of byId(events)) {
     const d = e.detail || {};
-    if (e.status === "error") s.errors += 1;
+    // A nova tentativa pedida ao modelo não é erro do turno; o <fake> que persiste é.
+    if (e.status === "error" && !isFakeRetry(e)) s.errors += 1;
     switch (`${e.kind}/${e.status}`) {
       case "turn/start":
         s.channel = d.channel ?? null;
@@ -325,6 +326,22 @@ export function runPhases(events, catalog) {
 }
 
 export const FAKE_TOOL = "<fake>";
+const FAKE_RETRY_MARK = "pedindo nova tentativa";
+
+function isFakeRetry(e) {
+  const detail = (e.detail || {}).detail;
+  return e.name === FAKE_TOOL && typeof detail === "string" && detail.includes(FAKE_RETRY_MARK);
+}
+
+// Texto do aviso no resumo: distingue a nova tentativa pedida da afirmação que persistiu.
+export function fakeActionLabel(summary) {
+  const detail = summary && summary.fakeAction;
+  if (!detail) return null;
+  if (String(detail).includes(FAKE_RETRY_MARK)) {
+    return "o modelo afirmou uma ação sem chamar a ferramenta; nova tentativa pedida";
+  }
+  return `ação inventada pelo modelo: ${detail}`;
+}
 
 export function num(value, digits = 0) {
   if (value == null || !Number.isFinite(Number(value))) return "—";

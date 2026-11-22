@@ -15,6 +15,7 @@ import {
   eventHint,
   num,
   speechSignal,
+  fakeActionLabel,
   timelineKey as computeTimelineKey,
 } from "/static/monitor-core.js";
 
@@ -236,7 +237,7 @@ function renderSummary(events) {
     ["Duração", s.status === "running" ? "em andamento" : formatDuration(s.durationMs)],
     ["Passos", s.steps != null ? num(s.steps) : null],
     ["Ferramentas usadas", num(s.toolCalls.length)],
-    ["Aviso", s.fakeAction ? "ação inventada pelo modelo" : null],
+    ["Aviso", fakeActionLabel(s)],
     ["Resposta", s.replyChars != null ? `${num(s.replyChars)} caracteres` : null],
     ["Erros", s.errors ? num(s.errors) : null],
     ["Motivo do erro", s.error ? clip(s.error, 300) : null],

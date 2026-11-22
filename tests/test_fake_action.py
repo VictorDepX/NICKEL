@@ -56,10 +56,35 @@ def test_claims_unexecuted_action_positives(text):
         "A nota. Criado em 2020, o livro é ótimo.",  # particípio em outra frase
         "Ainda não salvei nada.",
         "",
+        # I-1: pergunta, negação ou modal também no ramo `#N`
+        "Quer que eu apague o lembrete #2?",
+        "Não encontrei o lembrete #3.",
+        "Posso cancelar o lembrete #4 se quiser.",
+        "O lembrete #2 foi criado?",
+        # I-2: negação/futuro antes do substantivo ou fora da lacuna
+        "Nenhum lembrete foi criado.",
+        "Não há lembretes agendados para amanhã.",
+        "Você não tem nenhum evento marcado hoje.",
+        "Se o e-mail for enviado agora, chega antes das 9h.",
+        "O lembrete fica agendado assim que você confirmar.",
+        "Vou deixar o lembrete agendado para 15h, ok?",
+        "O e-mail ficará salvo como rascunho.",
+        # M-3: primeira pessoa negada
+        "Nunca criei esse lembrete.",
+        "Não, eu não salvei a memória.",
     ],
 )
 def test_claims_unexecuted_action_negatives(text):
     assert not claims_unexecuted_action(text)
+
+
+def test_claims_unexecuted_action_ignores_ids_already_known():
+    known = {1, 2}
+    assert not claims_unexecuted_action("Seu lembrete #1 foi criado para 15:11.", known)
+    assert not claims_unexecuted_action("Lembrete #1: Alongar (sáb 15:11) e Lembrete #2: Café.", known)
+    assert claims_unexecuted_action("Lembrete #3 criado: Alongar.", known)  # id novo
+    assert claims_unexecuted_action("Lembrete #1 e lembrete #3 criados.", known)  # um dos ids é novo
+    assert claims_unexecuted_action("Seu lembrete #1 foi criado para 15:11.")  # sem histórico
 
 
 def test_claims_unexecuted_action_patterns():
@@ -168,3 +193,66 @@ def test_catalog_lists_think_for_llm():
     from nickel.core.events import CATALOG
 
     assert "think" in CATALOG["llm"].fields
+
+
+def _no_fake(services, reply):
+    assert WARNING not in reply.text
+    assert _fakes(services) == []
+
+
+def test_recap_of_real_earlier_action_is_not_flagged(services, llm, registry):
+    llm.queue(
+        call("reminder_create", text="Alongar", when="2099-11-21T15:11:00-03:00"),
+        say("Pronto."),
+        say("Seu lembrete #1 foi criado para 15:11."),
+    )
+    agent = Agent(services, registry)
+    first = run(agent.handle(Turn(channel="ui", text="me lembre de alongar às 15:11")))
+    assert first.tools and first.tools[0]["summary"].startswith("Lembrete #1:")
+    reply = run(agent.handle(Turn(channel="ui", text="qual lembrete você criou?")))
+    assert reply.text == "Seu lembrete #1 foi criado para 15:11."
+    assert len(llm.calls) == 3  # sem nova tentativa
+    _no_fake(services, reply)
+
+
+def test_listing_known_reminders_is_not_flagged(services, llm, registry):
+    llm.queue(
+        call("reminder_create", text="Alongar", when="2099-11-21T15:11:00-03:00"),
+        call("reminder_create", text="Café", when="2099-11-21T16:00:00-03:00"),
+        say("Pronto."),
+        say("Lembrete #1: Alongar (sáb 15:11) e Lembrete #2: Café."),
+    )
+    agent = Agent(services, registry)
+    run(agent.handle(Turn(channel="ui", text="me lembre de alongar e do café")))
+    reply = run(agent.handle(Turn(channel="ui", text="quais são?")))
+    assert reply.text == "Lembrete #1: Alongar (sáb 15:11) e Lembrete #2: Café."
+    _no_fake(services, reply)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Quer que eu apague o lembrete #2?",
+        "Não encontrei o lembrete #3.",
+        "Nenhum lembrete foi criado.",
+        "Não há lembretes agendados para amanhã.",
+        "Você não tem nenhum evento marcado hoje.",
+        "Se o e-mail for enviado agora, chega antes das 9h.",
+        "O lembrete fica agendado assim que você confirmar.",
+        "Vou deixar o lembrete agendado para 15h, ok?",
+        "O e-mail ficará salvo como rascunho.",
+    ],
+)
+def test_honest_or_question_replies_are_not_flagged(services, llm, registry, text):
+    llm.queue(say(text))
+    reply = run(Agent(services, registry).handle(Turn(channel="ui", text="e aí?")))
+    assert reply.text == text
+    assert len(llm.calls) == 1
+    _no_fake(services, reply)
+
+
+def test_honest_reply_after_retry_has_no_warning(services, llm, registry):
+    llm.queue(say("Lembrete #2 criado."), say("Nenhum lembrete foi criado. Quer que eu crie agora?"))
+    reply = run(Agent(services, registry).handle(Turn(channel="ui", text="me lembre de alongar")))
+    assert reply.text == "Nenhum lembrete foi criado. Quer que eu crie agora?"
+    assert [e["detail"] for e in _fakes(services)] == [RETRY_DETAIL]  # só a nova tentativa, sem aviso

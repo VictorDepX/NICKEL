@@ -50,24 +50,55 @@ _FAKE_ACTION_RETRY = (
     "Se a ação é necessária, chame a ferramenta agora. Se não, responda sem afirmar que fez algo."
 )
 
-# Afirmação de ação concluída sem marcador (ex.: "Lembrete #2 criado: Alongar."). Padrão PT-BR estrito:
-# substantivo de recurso + particípio em até 60 caracteres na mesma frase, ou o id `#N` do resumo de tool,
-# ou a primeira pessoa no passado. Futuro, condicional e negação no meio ("será criado") não contam.
+# Afirmação de ação concluída sem marcador (ex.: "Lembrete #2 criado: Alongar."). Padrão PT-BR estrito,
+# frase a frase: substantivo de recurso + particípio em até 60 caracteres, ou o id `#N` do resumo de tool,
+# ou a primeira pessoa no passado. Não contam: perguntas, frases com negação, futuro, condicional ou modal
+# ("Nenhum lembrete foi criado.", "O lembrete será criado…", "Se o e-mail for enviado…") e frases cujos
+# `#N` já apareceram em resumos de tools do histórico (recapitulação de ação real).
 _RESOURCE = r"(?:lembretes?|mem[óo]rias?|prefer[êe]ncias?|notas?|eventos?|e-?mails?|mensage(?:m|ns)|compromissos?|tarefas?)"
-_PARTICIPLE = (
-    r"(?:criad|salv|agendad|enviad|cancelad|apagad|removid|registrad|anotad|marcad)[oa]s?"
-)
-_NOT_DONE = r"\b(?:ser|ser[áa]|ser[ãa]o|seria|seriam|vai|v[ãa]o|pode|podem|posso|quer|deseja|n[ãa]o)\b"
+_PARTICIPLE = r"(?:criad|salv|agendad|enviad|cancelad|apagad|removid|registrad|anotad|marcad)[oa]s?"
 _CLAIM_RE = re.compile(
-    rf"\b{_RESOURCE}\b(?:\s*#\d+|(?:(?!{_NOT_DONE})[^.!?\n]){{0,60}}?\b{_PARTICIPLE}\b)"
-    r"|(?<!\bn[ãa]o\s)\b(?:criei|salvei|agendei|enviei|cancelei|apaguei|removi|anotei|marquei|registrei)\b",
+    rf"\b{_RESOURCE}\b(?:\s*#\d+|[^.!?\n]{{0,60}}?\b{_PARTICIPLE}\b)"
+    r"|\b(?:criei|salvei|agendei|enviei|cancelei|apaguei|removi|anotei|marquei|registrei)\b",
     re.IGNORECASE,
 )
+_NOT_DONE_RE = re.compile(
+    r"\b(?:n[ãa]o|nunca|nenhum|nenhuma|ser|ser[áa]|ser[ãa]o|seria|seriam|vai|v[ãa]o|vou|pode|podem|posso|"
+    r"quer|deseja|h[áa]|tem|for|fica|ficar[áa]|estar[áa]|se)\b",
+    re.IGNORECASE,
+)
+_IDIOMS_RE = re.compile(r"\bpode deixar\b", re.IGNORECASE)  # "pode deixar" confirma, não é modal
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+_ID_RE = re.compile(r"#(\d+)")
 
 
-def claims_unexecuted_action(text: str) -> bool:
-    """Verdadeiro quando o texto afirma uma ação concluída (usado só quando nenhuma tool rodou)."""
-    return bool(text) and _CLAIM_RE.search(text) is not None
+def known_action_ids(history: list[StoredMessage]) -> set[int]:
+    """Ids `#N` citados nos resumos das tools que rodaram de fato em turnos anteriores."""
+    ids: set[int] = set()
+    for item in history:
+        if item.role != "assistant":
+            continue
+        for attachment in item.attachments:
+            if attachment.get("type") != "tools":
+                continue
+            for action in attachment.get("items") or []:
+                ids.update(int(n) for n in _ID_RE.findall(str(action.get("summary") or "")))
+    return ids
+
+
+def claims_unexecuted_action(text: str, known_ids: set[int] | frozenset[int] = frozenset()) -> bool:
+    """Verdadeiro quando alguma frase afirma uma ação concluída (usado só quando nenhuma tool rodou)."""
+    for sentence in _SENTENCE_SPLIT.split(text or ""):
+        sentence = sentence.strip()
+        if not sentence or sentence.endswith("?") or not _CLAIM_RE.search(sentence):
+            continue
+        if _NOT_DONE_RE.search(_IDIOMS_RE.sub(" ", sentence)):
+            continue
+        ids = {int(n) for n in _ID_RE.findall(sentence)}
+        if ids and ids <= set(known_ids):
+            continue
+        return True
+    return False
 
 
 def strip_fake_action_marker(text: str) -> str:
@@ -407,6 +438,7 @@ class Agent:
         extra: dict[str, Any] = {"options": options} if options else {}
         # O mesmo valor que os clientes mandam ao servidor (`options.get("think", settings.llm_think)`).
         think = options.get("think", settings.llm_think)
+        known_ids = known_action_ids(history)
         retried = False
 
         for step in range(settings.agent_max_steps):
@@ -453,7 +485,7 @@ class Agent:
                 fallback = "Feito." if executed else "Sem resposta do modelo."
                 text = reply.content or fallback
                 cleaned = strip_fake_action_marker(text)
-                faked = not executed and (cleaned != text or claims_unexecuted_action(cleaned))
+                faked = not executed and (cleaned != text or claims_unexecuted_action(cleaned, known_ids))
                 if faked and not retried and step + 1 < settings.agent_max_steps:
                     # Uma nova tentativa por turno; o pedido não vai para o histórico gravado.
                     retried = True

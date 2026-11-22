@@ -15,6 +15,7 @@ import {
   timelineKey,
   eventHint,
   speechSignal,
+  fakeActionLabel,
 } from "../../nickel/ui/static/monitor-core.js";
 
 const catalog = {
@@ -443,6 +444,28 @@ test("<fake> aparece na linha do tempo e no resumo, fora das ferramentas usadas"
   assert.deepEqual(s.toolCalls.map((t) => t.name), ["echo"]);
   assert.equal(s.fakeAction, "modelo afirmou ação sem chamar a ferramenta");
   assert.equal(runSummary([ev("turn", "start")]).fakeAction, null);
+});
+
+test("<fake> de nova tentativa não conta como erro e o aviso mostra o detalhe", () => {
+  nextId = 1;
+  const retry = ev("tool", "error", {
+    name: "<fake>",
+    detail: { detail: "modelo afirmou ação sem chamar a ferramenta; pedindo nova tentativa" },
+  });
+  const persisted = ev("tool", "error", { name: "<fake>", detail: { detail: "modelo afirmou ação sem chamar a ferramenta" } });
+  const ok = runSummary([
+    ev("turn", "start"),
+    retry,
+    ev("tool", "ok", { name: "reminder_create", detail: { summary: "Lembrete #1: x" } }),
+    ev("turn", "done", { detail: { steps: 3 } }),
+  ]);
+  assert.equal(ok.errors, 0);
+  assert.equal(ok.fakeAction, "modelo afirmou ação sem chamar a ferramenta; pedindo nova tentativa");
+  assert.equal(fakeActionLabel(ok), "o modelo afirmou uma ação sem chamar a ferramenta; nova tentativa pedida");
+  const bad = runSummary([ev("turn", "start"), retry, persisted, ev("turn", "done", { detail: { steps: 2 } })]);
+  assert.equal(bad.errors, 1);
+  assert.equal(fakeActionLabel(bad), "ação inventada pelo modelo: modelo afirmou ação sem chamar a ferramenta");
+  assert.equal(fakeActionLabel(runSummary([ev("turn", "start")])), null);
 });
 
 test("speechSignal: tts/start mostra Parar; tts/done e tts/error escondem, mesmo sem mudar a fase", () => {
