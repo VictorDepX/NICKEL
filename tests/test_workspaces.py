@@ -40,6 +40,11 @@ Narre com sobriedade.
 """
 
 
+def _plain(content: str) -> str:
+    """Tira o carimbo [agora: …] que o agente põe só na mensagem atual."""
+    return content.split("\n", 1)[1] if content.startswith("[agora: ") else content
+
+
 def write(directory: Path, name: str, text: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / name).write_text(text, encoding="utf-8")
@@ -202,11 +207,11 @@ def test_instructions_options_and_history_are_per_workspace(services, llm, regis
     assert "Workspace ativo: RPG CoC" in second["messages"][0]["content"]
     assert "Você é o Guardião" in second["messages"][0]["content"]
     assert second["options"] == {"think": False, "temperature": 0.8, "max_tokens": 900}
-    assert [m["content"] for m in second["messages"][1:]] == ["descreva o porão"]  # sem o histórico do geral
+    assert [_plain(m["content"]) for m in second["messages"][1:]] == ["descreva o porão"]  # sem o histórico do geral
 
     run(agent.handle(Turn(channel="ui", text="/geral voltei")))
     third = llm.calls[2]
-    assert [m["content"] for m in third["messages"][1:]] == ["oi geral", "Geral 1.", "voltei"]
+    assert [_plain(m["content"]) for m in third["messages"][1:]] == ["oi geral", "Geral 1.", "voltei"]
 
     assert [m.content for m in services.conversations.recent(10, "rpg-coc")] == ["descreva o porão", "Porão escuro."]
 
@@ -218,7 +223,7 @@ def test_history_limit_comes_from_workspace(services, llm, registry, wsdir):
         services.conversations.add("assistant", f"a{index}", channel="ui", conversation="rpg-coc")
     llm.queue(say("ok"))
     run(agent.handle(Turn(channel="ui", text="/rpg mais uma")))
-    sent = [m["content"] for m in llm.calls[0]["messages"][1:]]
+    sent = [_plain(m["content"]) for m in llm.calls[0]["messages"][1:]]
     assert sent == ["u3", "a3", "u4", "a4", "mais uma"]  # history: 4
 
 

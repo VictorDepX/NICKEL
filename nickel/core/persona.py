@@ -17,6 +17,17 @@ _FALLBACK = "You are Nickel, an adult, pragmatic personal assistant. Be brief an
 
 _WEEKDAYS = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
 
+
+def now_stamp(timezone: str, now: datetime | None = None) -> str:
+    """Data e hora atuais para ir junto da mensagem do usuário.
+
+    Modelos menores (visto com o Gemma 4) copiam datas do histórico; repetir "agora" na
+    última mensagem, onde a atenção é maior, evita lembretes no dia errado.
+    """
+    tz = ZoneInfo(timezone)
+    current = (now or datetime.now(tz)).astimezone(tz)
+    return f"[agora: {_WEEKDAYS[current.weekday()]}, {current.strftime('%d/%m/%Y %H:%M')}]"
+
 CHANNEL_RULES = {
     "whatsapp": (
         "Canal: WhatsApp. Responda em texto curto. Formatação do WhatsApp apenas: *negrito*, _itálico_, "
@@ -33,10 +44,11 @@ TOOL_RULES = """\
 Regras operacionais:
 - Responda sempre em português do Brasil.
 - Use tools só para ações reais ou dados verificáveis. Nunca diga que fez algo sem o resultado da tool com ok=true.
+- Para guardar algo na memória, chame memory_save direto; o NICKEL já pede a confirmação ao usuário. Não pergunte antes em texto.
 - Depois de uma tool, relate o que mudou em uma frase. Se falhou, diga o motivo e a próxima opção.
 - Datas relativas ("amanhã às 9", "sexta à noite") viram ISO 8601 com o fuso do usuário, a partir da data/hora atual abaixo. \
 "À noite" sem hora = 20:00; "de manhã" = 09:00; "à tarde" = 15:00. \
-"Daqui a N minutos/horas" soma N à hora de "Agora", nunca a horários que aparecem no histórico.
+"Daqui a N minutos/horas" soma N à data e hora de "Agora" (repetida como [agora: …] na mensagem do usuário), nunca a datas ou horários do histórico.
 - Pensamento avulso, ideia, desabafo para registrar ou pedido de "anota": use notes_capture. \
 Dê um título curto, organize o conteúdo em markdown limpo, corrija só a transcrição, sem inventar nada. \
 Em links, só cite notas que o usuário mencionou.

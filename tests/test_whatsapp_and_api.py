@@ -55,7 +55,7 @@ def test_image_goes_to_model(services, llm, channel):
     run(channel.handle_inbound({"id": "m2", "type": "image", "caption": "o que é?", "mimetype": "image/jpeg",
                                 "media_b64": image}))
     current = llm.calls[0]["messages"][-1]
-    assert current["images"] == [image] and current["content"] == "o que é?"
+    assert current["images"] == [image] and current["content"].split("\n", 1)[1] == "o que é?" and current["content"].startswith("[agora: ")
     assert list(services.settings.media_dir.glob("wa-m2*"))
 
 
@@ -65,7 +65,7 @@ def test_audio_is_transcribed_and_music_annotated(services, llm, channel):
     llm.queue(say("É Oceano, do Djavan: https://open.spotify.com/track/1"))
     audio = base64.b64encode(b"OggS-fake").decode()
     run(channel.handle_inbound({"id": "m3", "type": "ptt", "mimetype": "audio/ogg; codecs=opus", "media_b64": audio}))
-    content = llm.calls[0]["messages"][-1]["content"]
+    content = llm.calls[0]["messages"][-1]["content"].split("\n", 1)[1]
     assert content.startswith("[Áudio] que música é essa")
     assert "[Reconhecimento musical: 'Oceano' — Djavan. Spotify: https://open.spotify.com/track/1]" in content
     stored = services.conversations.recent(5)[0]

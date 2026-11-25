@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nickel.core.llm import LLMError
-from nickel.core.persona import build_system_prompt
+from nickel.core.persona import build_system_prompt, now_stamp
 from nickel.core.reasoning import ReasoningTracker
 from nickel.core.skills import ToolContext, ToolRegistry, ToolResult, validate_arguments
 from nickel.core.stores import PendingAction, StoredMessage
@@ -432,7 +432,8 @@ class Agent:
             memory=self.services.memory.all(),
             workspace=workspace,
         )
-        current: dict[str, Any] = {"role": "user", "content": turn.llm_text or turn.text}
+        user_text = turn.llm_text or turn.text
+        current: dict[str, Any] = {"role": "user", "content": f"{now_stamp(settings.timezone)}\n{user_text}"}
         if turn.images:
             current["images"] = turn.images
         past = self._history_messages(history)
