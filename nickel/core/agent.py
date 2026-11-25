@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
@@ -159,6 +160,24 @@ class Turn:
     attachments: list[dict[str, Any]] = field(default_factory=list)
     last_audio_path: Path | None = None
     think: bool | None = None  # sobrescreve `think` nas opções do LLM quando definido
+
+
+def history_transcript(past: list[dict[str, Any]], current_text: str) -> str:
+    """Histórico em texto corrido + mensagem atual; ações passadas viram linhas com o resultado real."""
+    lines: list[str] = []
+    for message in past:
+        role = message.get("role")
+        if role == "tool":
+            lines.append(f"[resultado de {message.get('tool_name', 'ferramenta')}: {message.get('content', '')}]")
+        elif role == "assistant" and message.get("tool_calls"):
+            for call in message["tool_calls"]:
+                fn = call.get("function", {})
+                args = json.dumps(fn.get("arguments") or {}, ensure_ascii=False)
+                lines.append(f"[NICKEL executou {fn.get('name', '')} {args} (id {call.get('id', '')})]")
+        elif message.get("content"):
+            speaker = "Usuário" if role == "user" else "NICKEL"
+            lines.append(f"{speaker}: {message['content']}")
+    return "Conversa anterior (só contexto):\n" + "\n".join(lines) + "\n\nMensagem atual:\n" + current_text
 
 
 @dataclass
@@ -437,6 +456,16 @@ class Agent:
         if turn.images:
             current["images"] = turn.images
         past = self._history_messages(history)
+        options = workspace.llm_options()
+        if turn.think is not None:
+            options["think"] = turn.think
+        # O mesmo valor que os clientes mandam ao servidor (`options.get("think", settings.llm_think)`).
+        think = options.get("think", settings.llm_think)
+        if think and past:
+            # Com o histórico em turnos, o Gemma 4 imita as respostas antigas (que chegam sem
+            # pensamento) e deixa de pensar; como transcrição na mensagem atual, ele pensa.
+            current = {**current, "content": history_transcript(past, current["content"])}
+            past = []
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *past, current]
         tools = self.registry.schemas(self.services, workspace)
         tool_names = [t.get("function", {}).get("name", "") for t in tools or []]
@@ -460,12 +489,7 @@ class Agent:
         model = (settings.llm_cloud_model or settings.llm_model) if cloud else settings.llm_model
         backend = "cloud" if cloud else "local"
         stream = bool(getattr(llm, "supports_stream", False) and settings.llm_stream)
-        options = workspace.llm_options()
-        if turn.think is not None:
-            options["think"] = turn.think
         extra: dict[str, Any] = {"options": options} if options else {}
-        # O mesmo valor que os clientes mandam ao servidor (`options.get("think", settings.llm_think)`).
-        think = options.get("think", settings.llm_think)
         known_ids = known_action_ids(history)
         retried = False
 
