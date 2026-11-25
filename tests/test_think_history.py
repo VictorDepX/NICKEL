@@ -47,3 +47,15 @@ def test_transcript_keeps_past_actions_with_real_results():
     assert '[NICKEL executou reminder_create {"text": "x"} (id c1)]' in text
     assert "[resultado de reminder_create: ok: Lembrete #3 criado]" in text
     assert text.endswith("NICKEL: Criado.\n\nMensagem atual:\ne agora?")
+
+
+def test_stable_window_moves_in_steps():
+    from nickel.core.agent import stable_window
+    starts = []
+    for total in range(20, 32, 2):  # 6 turnos (usuário + assistente) com limite 20
+        recent = list(range(total - 20, total))
+        window = stable_window(recent, total, 20)
+        assert 10 <= len(window) <= 20 and window[-1] == total - 1 and window[0] % 2 == 0
+        starts.append(window[0])
+    assert starts == [0, 10, 10, 10, 10, 10]  # o prefixo só muda a cada 5 turnos
+    assert stable_window([1, 2, 3], 3, 20) == [1, 2, 3]

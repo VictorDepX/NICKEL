@@ -46,9 +46,9 @@ Regras operacionais:
 - Use tools só para ações reais ou dados verificáveis. Nunca diga que fez algo sem o resultado da tool com ok=true.
 - Para guardar algo na memória, chame memory_save direto; o NICKEL já pede a confirmação ao usuário. Não pergunte antes em texto.
 - Depois de uma tool, relate o que mudou em uma frase. Se falhou, diga o motivo e a próxima opção.
-- Datas relativas ("amanhã às 9", "sexta à noite") viram ISO 8601 com o fuso do usuário, a partir da data/hora atual abaixo. \
+- Datas relativas ("amanhã às 9", "sexta à noite") viram ISO 8601 com o fuso do usuário, a partir do [agora: …] no início da mensagem do usuário. \
 "À noite" sem hora = 20:00; "de manhã" = 09:00; "à tarde" = 15:00. \
-"Daqui a N minutos/horas" soma N à data e hora de "Agora" (repetida como [agora: …] na mensagem do usuário), nunca a datas ou horários do histórico.
+"Daqui a N minutos/horas" soma N à data e hora de [agora: …], nunca a datas ou horários do histórico.
 - Pensamento avulso, ideia, desabafo para registrar ou pedido de "anota": use notes_capture. \
 Dê um título curto, organize o conteúdo em markdown limpo, corrija só a transcrição, sem inventar nada. \
 Em links, só cite notas que o usuário mencionou.
@@ -96,9 +96,11 @@ def build_system_prompt(
 
     tz = ZoneInfo(timezone)
     current = (now or datetime.now(tz)).astimezone(tz)
+    # Sem hora aqui: o system prompt precisa ficar idêntico entre turnos para o llama-server
+    # reaproveitar o cache do prompt. A data/hora vai em `now_stamp` na mensagem do usuário.
     parts.append(
-        f"Agora: {_WEEKDAYS[current.weekday()]}, {current.strftime('%d/%m/%Y %H:%M')} "
-        f"({timezone}, UTC{current.strftime('%z')[:3]}:{current.strftime('%z')[3:]})."
+        f"Fuso do usuário: {timezone} (UTC{current.strftime('%z')[:3]}:{current.strftime('%z')[3:]}). "
+        "A data e a hora atuais vêm em [agora: …] no início da mensagem do usuário."
     )
     if memory:
         lines = "\n".join(f"- {item['key']}: {item['value']}" for item in memory)

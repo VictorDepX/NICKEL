@@ -52,6 +52,10 @@ class ConversationStore:
             (conversation, channel, role, content, dumps(attachments or []), iso(utcnow())),
         )
 
+    def count(self, conversation: str = MAIN_CONVERSATION) -> int:
+        rows = self.db.query("SELECT COUNT(*) AS n FROM messages WHERE conversation = ?", (conversation,))
+        return int(rows[0]["n"]) if rows else 0
+
     def recent(self, limit: int, conversation: str = MAIN_CONVERSATION) -> list[StoredMessage]:
         rows = self.db.query(
             "SELECT * FROM messages WHERE conversation = ? ORDER BY id DESC LIMIT ?",

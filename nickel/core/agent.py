@@ -162,6 +162,22 @@ class Turn:
     think: bool | None = None  # sobrescreve `think` nas opções do LLM quando definido
 
 
+def stable_window(recent: list[Any], total: int, limit: int) -> list[Any]:
+    """Corta o histórico em degraus em vez de deslizar 1 mensagem por turno.
+
+    Com janela deslizante, o início do histórico muda a cada turno e o llama-server relê
+    tudo depois do system prompt. Com degraus de `limit // 2` (par, para começar no usuário),
+    o prefixo fica igual por vários turnos e o cache de prompt é reaproveitado.
+    O tamanho fica entre `limit - step` e `limit`.
+    """
+    if total <= limit or limit < 4:
+        return recent
+    step = max(2, (limit // 2) // 2 * 2)
+    start = -(-(total - limit) // step) * step  # arredonda para cima
+    first = total - len(recent)
+    return recent[max(0, start - first):]
+
+
 def history_transcript(past: list[dict[str, Any]], current_text: str) -> str:
     """Histórico em texto corrido + mensagem atual; ações passadas viram linhas com o resultado real."""
     lines: list[str] = []
@@ -241,7 +257,7 @@ class Agent:
         store = self.services.conversations
         conversation = workspace.conversation
         limit = workspace.history or self.services.settings.agent_history_messages
-        history = store.recent(limit, conversation)
+        history = stable_window(store.recent(limit, conversation), store.count(conversation), limit)
         store.add(
             "user",
             turn.llm_text or turn.text,
