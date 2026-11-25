@@ -470,3 +470,32 @@ def test_float_wav_cannot_be_concatenated(tmp_path):
     with pytest.raises(TTSError, match="formato WAV não suportado para concatenação: .*3"):
         run(vs.synthesize(text))
     assert list(tmp_path.glob("*.wav")) == []  # o temporário não fica para trás
+
+
+def test_busy_gpu_429_is_retried_until_free(tmp_path, monkeypatch):
+    from nickel.speech import voicestudio
+    monkeypatch.setattr(voicestudio, "_BUSY_WAIT_SECONDS", 0)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) < 3:
+            return httpx.Response(429, json={"error": {"message": "the local GPU worker pool is saturated"}})
+        return httpx.Response(200, content=make_wav())
+
+    path = run(speaker(tmp_path, handler).synthesize("oi"))
+    assert len(calls) == 3 and path.read_bytes().startswith(b"RIFF")
+
+
+def test_busy_gpu_429_gives_up_after_retries(tmp_path, monkeypatch):
+    from nickel.speech import voicestudio
+    monkeypatch.setattr(voicestudio, "_BUSY_WAIT_SECONDS", 0)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(429, json={"error": {"message": "saturated"}})
+
+    with pytest.raises(TTSError, match="429"):
+        run(speaker(tmp_path, handler).synthesize("oi"))
+    assert len(calls) == voicestudio._BUSY_RETRIES + 1

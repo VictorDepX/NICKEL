@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import tempfile
@@ -21,6 +22,9 @@ log = logging.getLogger(__name__)
 _DEFAULT_URL = "http://127.0.0.1:3900"
 _MAX_INPUT = 4096
 _CHUNK_LIMIT = 4000
+# 429 = fila da GPU cheia (a fala anterior ainda está sendo gerada, mesmo após "Parar").
+_BUSY_RETRIES = 12
+_BUSY_WAIT_SECONDS = 2.5
 
 
 def _error_message(response: httpx.Response) -> str:
@@ -70,14 +74,19 @@ class VoiceStudioSpeaker:
             "response_format": "wav",
             "speed": 1.0,
         }
-        try:
-            response = await self._get_client().post("/v1/audio/speech", json=body)
-        except httpx.TimeoutException as exc:
-            raise TTSError(
-                "VoiceStudio demorou demais para responder (aumente VOICESTUDIO_TIMEOUT_SECONDS)."
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise TTSError(f"Não foi possível falar com o VoiceStudio: {type(exc).__name__}.") from exc
+        for attempt in range(_BUSY_RETRIES + 1):
+            try:
+                response = await self._get_client().post("/v1/audio/speech", json=body)
+            except httpx.TimeoutException as exc:
+                raise TTSError(
+                    "VoiceStudio demorou demais para responder (aumente VOICESTUDIO_TIMEOUT_SECONDS)."
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise TTSError(f"Não foi possível falar com o VoiceStudio: {type(exc).__name__}.") from exc
+            if response.status_code != 429 or attempt == _BUSY_RETRIES:
+                break
+            log.info("VoiceStudio ocupado (429); nova tentativa %d/%d", attempt + 1, _BUSY_RETRIES)
+            await asyncio.sleep(_BUSY_WAIT_SECONDS)
         if response.status_code >= 400:
             raise TTSError(f"VoiceStudio ({response.status_code}): {_error_message(response)}")
         if not playback.is_riff_wave(response.content):
