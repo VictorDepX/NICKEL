@@ -49,7 +49,7 @@ def test_every_phase_value_has_a_label():
     assert set(PHASES.values()) <= set(PHASE_LABELS)
     assert set(PHASE_LABELS) == {
         "idle", "routing", "prompting", "thinking", "answering",
-        "tool", "confirming", "listening", "speaking", "error",
+        "tool", "confirming", "listening", "transcribing", "speaking", "error",
     }
     for kind, status in list(PHASES) + list(TURN_FLOW):
         assert kind in CATALOG and status in CATALOG[kind].statuses

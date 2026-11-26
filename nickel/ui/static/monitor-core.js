@@ -381,3 +381,60 @@ export function elapsedMs(since, nowMs) {
   if (!Number.isFinite(start)) return null;
   return Math.max(0, nowMs - start);
 }
+
+// Linha de status do chat ("o que o modelo está fazendo"), a partir do mesmo estado do Monitor.
+// `active` = há trabalho em curso; `elapsedMs` conta desde o início do turno (ou da fala).
+const ACTIVE_TEXT = {
+  routing: "Preparando o pedido",
+  prompting: "Preparando o pedido",
+  answering: "Escrevendo a resposta",
+  confirming: "Aguardando sua confirmação",
+  listening: "Ouvindo",
+  transcribing: "Transcrevendo o áudio",
+  speaking: "Falando a resposta",
+};
+
+export function chatStatus(state, nowMs) {
+  const events = state.runId ? byId(state.timeline.filter((e) => e.run_id === state.runId)) : [];
+  const turnStart = events.find((e) => e.kind === "turn" && e.status === "start");
+  const last = (kind, status) => [...events].reverse().find((e) => e.kind === kind && (!status || e.status === status));
+  const phase = state.phase || "idle";
+  const since = phase === "speaking" || phase === "listening" || phase === "transcribing" || !turnStart ? state.since : turnStart.at;
+  const elapsed = elapsedMs(since, nowMs);
+
+  if (phase === "idle" || phase === "error") {
+    const done = last("turn", "done") || last("turn", "error");
+    const llm = last("llm", "done");
+    const parts = [];
+    if (done && done.duration_ms != null) parts.push(`última resposta em ${formatDuration(done.duration_ms)}`);
+    if (llm && llm.detail && llm.detail.tokens_per_second != null) parts.push(`${num(llm.detail.tokens_per_second, 1)} tok/s`);
+    if (phase === "error") {
+      const failure = [...state.timeline].reverse().find((e) => e.status === "error");
+      const detail = failure && failure.detail && (failure.detail.detail || failure.detail.error);
+      return { active: false, phase, text: detail ? `Erro: ${detail}` : "Erro", detail: parts.join(" · "), elapsedMs: null };
+    }
+    return { active: false, phase, text: "Pronto", detail: parts.join(" · "), elapsedMs: null };
+  }
+
+  let text = ACTIVE_TEXT[phase];
+  let detail = "";
+  if (phase === "tool") {
+    const tool = last("tool", "start");
+    text = tool ? `Executando ${tool.name}` : "Executando ferramenta";
+  } else if (phase === "thinking") {
+    const toolDone = [...events].reverse().find((e) => e.kind === "tool" && (e.status === "ok" || e.status === "error") && e.name !== FAKE_TOOL);
+    const llmDone = last("llm", "done");
+    const afterTool = toolDone && (!llmDone || toolDone.id > llmDone.id);
+    if (state.reasoning && state.reasoning.active && state.reasoning.chars > 0) {
+      text = "Pensando";
+      detail = `${num(state.reasoning.chars)} caracteres de raciocínio`;
+    } else if (afterTool) {
+      text = `Analisando o resultado de ${toolDone.name}`;
+    } else if (state.think === true) {
+      text = "Pensando";
+    } else {
+      text = "Lendo o pedido";
+    }
+  }
+  return { active: true, phase, text: text || "Trabalhando", detail, elapsedMs: elapsed };
+}

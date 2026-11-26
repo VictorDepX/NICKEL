@@ -172,3 +172,41 @@ details.panel summary::-webkit-details-marker { display: none; }
   .conversation { border-right: 0; border-bottom: 1px solid var(--border); }
   .side { overflow: visible; }
 }
+
+/* ------------------------------------------------------------ markdown nas respostas */
+
+.bubble.md { white-space: normal; }
+.bubble.md p { margin: 0 0 8px; }
+.bubble.md p:last-child, .bubble.md ul:last-child, .bubble.md ol:last-child, .bubble.md pre:last-child { margin-bottom: 0; }
+.bubble.md .md-h { font-weight: 600; margin-top: 4px; }
+.bubble.md ul, .bubble.md ol { margin: 0 0 8px; padding-left: 20px; }
+.bubble.md li { margin: 2px 0; }
+.bubble.md code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+.bubble.md pre { margin: 0 0 8px; padding: 10px; background: var(--surface-2); border-radius: 8px; overflow-x: auto; }
+.bubble.md pre code { background: none; padding: 0; }
+
+/* ------------------------------------------------------------ status do modelo no chat */
+
+.chat-status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px clamp(16px, 4vw, 48px);
+  font-size: 12.5px; color: var(--muted);
+}
+.chat-status[data-active="true"] { color: var(--text); }
+.chat-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--phase); flex: none; opacity: 0.5; }
+.chat-status[data-active="true"] .chat-status-dot { opacity: 1; animation: chat-pulse 1.2s ease-in-out infinite; }
+.chat-status-detail { color: var(--muted); }
+.chat-status-time { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+@keyframes chat-pulse { 50% { transform: scale(0.6); opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .chat-status[data-active="true"] .chat-status-dot { animation: none; } }
+
+/* ------------------------------------------------------------ conectores e pipelines */
+
+.conn-name { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.conn-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--muted); }
+.conn-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.conn-dot.warn { background: var(--warn); }
+.conn-dot.bad { background: var(--bad); }
+.conn-list li.conn { padding-left: 2px; }
+.conn-list li.conn .hint { padding-left: 17px; }
+#tools-line { margin: 10px 0 0; font-size: 12px; }

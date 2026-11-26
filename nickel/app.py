@@ -19,10 +19,12 @@ from nickel.channels.voice import VoiceController
 from nickel.channels.whatsapp import WhatsAppChannel, prune_media
 from nickel.config import Settings, load_settings
 from nickel.core.agent import Agent, Turn
+from nickel.core.connectors import build_connectors
 from nickel.core.events import CATALOG, PHASE_LABELS, PHASES
 from nickel.core.report import render_run_report
 from nickel.core.trace import new_run_id, run_scope
 from nickel.core.skills import ToolRegistry
+from nickel.core.sysmon import MemorySampler
 from nickel.services import SPEECH_MAX_CHARS, Services, build_services
 from nickel.skills import build_registry
 
@@ -64,6 +66,7 @@ def create_app(
     agent = Agent(services, registry)
     whatsapp = WhatsAppChannel(services, agent)
     voice = VoiceController(services, agent)
+    memory_sampler = MemorySampler()
     pending_tasks: set[asyncio.Task] = set()
 
     def spawn(coro) -> None:
@@ -120,6 +123,8 @@ def create_app(
                 log.info("%s mídia(s) antiga(s) removida(s)", removed)
         if background and services.reminders is not None:
             workers.append(asyncio.create_task(services.reminders.run(stop)))
+        if background:
+            workers.append(asyncio.create_task(memory_sampler.run(stop)))
         if background and services.stt is not None and hasattr(services.stt, "warm_up"):
             workers.append(asyncio.create_task(services.stt.warm_up()))
         async def announce_health() -> None:
@@ -185,14 +190,26 @@ def create_app(
     @app.get("/api/state")
     async def state() -> dict[str, Any]:
         active = services.workspaces.active()
+        snapshot = await services_snapshot()
         return {
-            **await services_snapshot(),
+            **snapshot,
+            **build_connectors(
+                snapshot,
+                whatsapp=services.whatsapp is not None,
+                music=services.music is not None,
+                reminders=services.reminders is not None,
+                obsidian_path=str(settings.obsidian_vault_path or ""),
+            ),
             "music": services.music is not None,
             "tools": [tool.name for tool in registry.available(services)],
             "workspace": active.id,
             # Padrão efetivo de `think` quando a UI não manda: o do workspace ativo, senão LLM_THINK.
             "think_default": active.think if active.think is not None else settings.llm_think,
         }
+
+    @app.get("/api/system/memory")
+    async def system_memory() -> dict[str, Any]:
+        return memory_sampler.snapshot()
 
     @app.get("/api/messages")
     async def messages(limit: int = 60, workspace: str | None = None) -> list[dict[str, Any]]:

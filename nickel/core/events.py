@@ -49,6 +49,7 @@ PHASE_LABELS: dict[str, str] = {
     "tool": "Executando ferramenta",
     "confirming": "Aguardando confirmação",
     "listening": "Ouvindo",
+    "transcribing": "Transcrevendo",
     "speaking": "Falando",
     "error": "Erro",
 }
@@ -68,6 +69,7 @@ PHASES: dict[tuple[str, str], str] = {
     ("turn", "error"): "error",
     ("llm", "error"): "error",
     ("voice", "listening"): "listening",
+    ("voice", "transcribing"): "transcribing",
     ("voice", "speaking"): "speaking",
     ("voice", "idle"): "idle",
     # A UI só aplica estas três se a fase permite (monitor-core.js `ttsMayChangePhase`):

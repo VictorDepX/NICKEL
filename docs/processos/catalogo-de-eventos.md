@@ -48,3 +48,4 @@ O monitor deduz a fase atual a partir do último evento que muda de fase.
 | `voice` | `idle` | Ocioso (`idle`) |
 | `voice` | `listening` | Ouvindo (`listening`) |
 | `voice` | `speaking` | Falando (`speaking`) |
+| `voice` | `transcribing` | Transcrevendo (`transcribing`) |

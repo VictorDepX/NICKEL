@@ -27,6 +27,12 @@
     <section class="conversation" aria-labelledby="conv-title">
       <h2 id="conv-title" class="sr-only">Conversa</h2>
       <ol class="messages" id="messages" aria-live="polite"></ol>
+      <div class="chat-status" id="chat-status" data-phase="idle" data-active="false">
+        <span class="chat-status-dot" aria-hidden="true"></span>
+        <span class="chat-status-text" id="chat-status-text" role="status" aria-live="polite">Pronto</span>
+        <span class="chat-status-detail" id="chat-status-detail"></span>
+        <span class="chat-status-time" id="chat-status-time" aria-hidden="true"></span>
+      </div>
       <form class="composer" id="composer">
         <label for="input" class="sr-only">Mensagem</label>
         <textarea id="input" rows="1" placeholder="Escreva para o NICKEL… (Enter envia, Shift+Enter quebra linha)"></textarea>
@@ -51,8 +57,14 @@
       </section>
 
       <section class="panel" aria-labelledby="connections-title">
-        <h2 id="connections-title">Conexões</h2>
-        <ul id="connections" class="list"></ul>
+        <h2 id="connections-title">Conectores</h2>
+        <ul id="connections" class="list conn-list"></ul>
+        <p class="hint" id="tools-line"></p>
+      </section>
+
+      <section class="panel" id="pipelines-panel" aria-labelledby="pipelines-title" hidden>
+        <h2 id="pipelines-title">Pipelines</h2>
+        <ul id="pipelines" class="list conn-list"></ul>
       </section>
 
       <section class="panel" aria-labelledby="memory-title">
@@ -117,6 +129,20 @@
         <div class="groups" id="timeline-groups"></div>
       </section>
 
+      <section class="panel sysmem" id="sysmem" aria-labelledby="sysmem-title" hidden>
+        <div class="panel-head">
+          <h2 id="sysmem-title">Memória do sistema</h2>
+          <span class="pill" id="sysmem-level"></span>
+        </div>
+        <dl class="facts" id="sysmem-facts"></dl>
+        <div class="sysmem-chart" id="sysmem-chart"></div>
+        <ul class="sysmem-legend" id="sysmem-legend" aria-label="Legenda"></ul>
+        <details class="tech">
+          <summary>Ver tabela</summary>
+          <table class="sysmem-table" id="sysmem-table"></table>
+        </details>
+      </section>
+
       <section class="panel runs" aria-labelledby="runs-title">
         <h2 id="runs-title">Execuções</h2>
         <ul class="list" id="runs-list"></ul>
@@ -124,7 +150,7 @@
     </div>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script type="module" src="/static/app.js"></script>
   <script type="module" src="/static/monitor.js"></script>
 </body>
 </html>

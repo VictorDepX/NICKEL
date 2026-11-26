@@ -17,6 +17,7 @@ import {
   speechSignal,
   fakeActionLabel,
   timelineKey as computeTimelineKey,
+  chatStatus,
 } from "/static/monitor-core.js";
 
 const $ = (id) => document.getElementById(id);
@@ -123,6 +124,157 @@ function renderBand(phases) {
 
 function tick() {
   setText($("phase-timer"), formatClock(elapsedMs(state.since, Date.now())));
+}
+
+// ------------------------------------------------------------ status no chat
+
+let chatActive = false;
+
+function renderChatStatus() {
+  const box = $("chat-status");
+  if (!box) return;
+  const st = chatStatus(state, Date.now());
+  chatActive = st.active;
+  box.dataset.phase = st.phase;
+  box.dataset.active = String(st.active);
+  setText($("chat-status-text"), st.active ? `${st.text}…` : st.text);
+  setText($("chat-status-detail"), st.detail ? `· ${st.detail}` : "");
+  setText($("chat-status-time"), st.active && st.elapsedMs != null ? formatClock(st.elapsedMs) : "");
+}
+
+// ------------------------------------------------------------ memória do sistema
+
+const GIB = 1024 ** 3;
+const MEM_SERIES = [
+  { key: "used", label: "RAM usada (total)", cls: "s1", area: true },
+  { key: "llama", label: "llama-server (modelo)", cls: "s2" },
+  { key: "nickel", label: "NICKEL", cls: "s3" },
+];
+const SVG_NS = "http://www.w3.org/2000/svg";
+let memTimer = null;
+let memData = null;
+
+const gb = (bytes) => `${num(bytes / GIB, 1)} GB`;
+
+function svg(tag, attrs = {}, ...children) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) if (value != null) el.setAttribute(key, String(value));
+  el.append(...children);
+  return el;
+}
+
+function memLevel(last) {
+  const free = last.available / GIB;
+  if (free < 1) return ["bad", "pouca RAM livre"];
+  if (free < 2.5) return ["warn", "RAM apertada"];
+  return ["ok", "RAM folgada"];
+}
+
+function drawMemChart(samples) {
+  const box = $("sysmem-chart");
+  const width = Math.max(260, box.clientWidth || 520);
+  const height = 170;
+  const pad = { l: 44, r: 10, t: 8, b: 22 };
+  const total = samples[samples.length - 1].total;
+  const t0 = samples[0].t;
+  const t1 = Math.max(samples[samples.length - 1].t, t0 + 1);
+  const x = (t) => pad.l + ((t - t0) / (t1 - t0)) * (width - pad.l - pad.r);
+  const y = (v) => pad.t + (1 - v / total) * (height - pad.t - pad.b);
+  const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height, role: "img", "aria-label": "Uso de memória RAM nos últimos minutos" });
+  const step = total / GIB > 24 ? 8 : 4;
+  for (let g = 0; g <= total / GIB + 0.01; g += step) {
+    root.append(
+      svg("line", { x1: pad.l, x2: width - pad.r, y1: y(g * GIB), y2: y(g * GIB), class: "grid" }),
+      svg("text", { x: pad.l - 6, y: y(g * GIB) + 4, class: "axis", "text-anchor": "end" }, `${g} GB`),
+    );
+  }
+  root.append(svg("line", { x1: pad.l, x2: width - pad.r, y1: y(total), y2: y(total), class: "limit" }));
+  const minutes = Math.round((t1 - t0) / 60);
+  root.append(
+    svg("text", { x: pad.l, y: height - 6, class: "axis" }, minutes >= 1 ? `há ${minutes} min` : "agora"),
+    svg("text", { x: width - pad.r, y: height - 6, class: "axis", "text-anchor": "end" }, "agora"),
+  );
+  for (const serie of MEM_SERIES) {
+    const pts = samples.map((p) => `${x(p.t).toFixed(1)},${y(p[serie.key] || 0).toFixed(1)}`);
+    if (serie.area) {
+      root.append(svg("path", { d: `M${x(t0)},${y(0)} L${pts.join(" L")} L${x(samples[samples.length - 1].t)},${y(0)} Z`, class: `area ${serie.cls}` }));
+    }
+    root.append(svg("polyline", { points: pts.join(" "), class: `line ${serie.cls}` }));
+    const last = samples[samples.length - 1];
+    root.append(svg("circle", { cx: x(last.t), cy: y(last[serie.key] || 0), r: 4, class: `end ${serie.cls}` }));
+  }
+  // Hover: linha vertical + valores do ponto mais próximo.
+  const cross = svg("line", { y1: pad.t, y2: height - pad.b, class: "cross", visibility: "hidden" });
+  const tip = h("div", { class: "sysmem-tip", hidden: true });
+  const hit = svg("rect", { x: pad.l, y: pad.t, width: width - pad.l - pad.r, height: height - pad.t - pad.b, fill: "transparent" });
+  hit.addEventListener("pointermove", (event) => {
+    const rect = root.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / rect.width) * width;
+    const t = t0 + ((px - pad.l) / (width - pad.l - pad.r)) * (t1 - t0);
+    const p = samples.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
+    cross.setAttribute("x1", x(p.t));
+    cross.setAttribute("x2", x(p.t));
+    cross.setAttribute("visibility", "visible");
+    tip.replaceChildren(
+      h("b", {}, new Date(p.t * 1000).toLocaleTimeString("pt-BR")),
+      ...MEM_SERIES.map((s) => h("div", {}, h("span", { class: `swatch ${s.cls}` }), `${s.label}: ${gb(p[s.key] || 0)}`)),
+      h("div", {}, `Livre: ${gb(p.available)}`),
+    );
+    tip.hidden = false;
+    tip.style.left = `${Math.min(rect.width - 190, Math.max(0, event.clientX - rect.left + 12))}px`;
+  });
+  hit.addEventListener("pointerleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    tip.hidden = true;
+  });
+  root.append(cross, hit);
+  box.replaceChildren(root, tip);
+}
+
+function renderMemory() {
+  const panel = $("sysmem");
+  if (!memData || !memData.available || !memData.samples.length) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const samples = memData.samples;
+  const last = samples[samples.length - 1];
+  const [level, levelText] = memLevel(last);
+  const pill = $("sysmem-level");
+  pill.className = `pill ${level}`;
+  setText(pill, levelText);
+  setFacts($("sysmem-facts"), [
+    ["Usada", `${gb(last.used)} de ${gb(last.total)} (${num((last.used / last.total) * 100)}%)`],
+    ["Livre", gb(last.available)],
+    ["llama-server", last.llama ? gb(last.llama) : "não encontrado"],
+    ["NICKEL", gb(last.nickel)],
+  ]);
+  $("sysmem-legend").replaceChildren(
+    ...MEM_SERIES.map((s) => h("li", {}, h("span", { class: `swatch ${s.cls}`, "aria-hidden": "true" }), s.label)),
+  );
+  drawMemChart(samples);
+  const rows = samples.slice(-12).reverse();
+  $("sysmem-table").replaceChildren(
+    h("thead", {}, h("tr", {}, h("th", {}, "Hora"), ...MEM_SERIES.map((s) => h("th", {}, s.label)), h("th", {}, "Livre"))),
+    h("tbody", {}, ...rows.map((p) => h("tr", {},
+      h("td", {}, new Date(p.t * 1000).toLocaleTimeString("pt-BR")),
+      ...MEM_SERIES.map((s) => h("td", {}, gb(p[s.key] || 0))),
+      h("td", {}, gb(p.available)),
+    ))),
+  );
+}
+
+async function refreshMemory() {
+  clearTimeout(memTimer);
+  try {
+    const response = await fetch("/api/system/memory");
+    if (response.ok) memData = await response.json();
+  } catch {
+    /* mantém a última leitura */
+  }
+  if (visible()) renderMemory();
+  memTimer = setTimeout(refreshMemory, visible() ? 5000 : 30000);
 }
 
 // ------------------------------------------------------------ raciocínio
@@ -539,6 +691,7 @@ function scheduleRunsRefresh() {
 function render() {
   renderQueued = false;
   renderPhaseDot();
+  renderChatStatus();
   if (!visible()) return;
   const events = currentRunEvents();
   const phases = runPhases(events, catalog);
@@ -617,9 +770,19 @@ async function main() {
     if (event.detail === "monitor") {
       timelineKey = "";
       scheduleRender();
+      refreshMemory();
     }
   });
-  setInterval(() => visible() && tick(), 1000);
+  setInterval(() => {
+    if (visible()) tick();
+    if (chatActive) renderChatStatus();
+  }, 1000);
+  refreshMemory();
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => visible() && renderMemory(), 200);
+  });
   scheduleRender();
   catalog = await loadCatalog();
   filtersKey = "";

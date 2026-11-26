@@ -10,7 +10,7 @@
 [data-phase="thinking"] { --phase: var(--think); }
 [data-phase="answering"] { --phase: var(--ok); }
 [data-phase="tool"], [data-phase="confirming"] { --phase: var(--warn); }
-[data-phase="listening"], [data-phase="speaking"] { --phase: var(--accent); }
+[data-phase="listening"], [data-phase="transcribing"], [data-phase="speaking"] { --phase: var(--accent); }
 [data-phase="error"] { --phase: var(--bad); }
 
 /* ------------------------------------------------------------ abas */
@@ -209,3 +209,35 @@ button.chip[aria-pressed="true"] { color: var(--text); background: var(--surface
   .phase-band .phase-dot, .tab-dot, .reasoning .tail::after,
   .reasoning .reasoning-empty p::after { animation: none !important; }
 }
+
+/* ------------------------------------------------------------ memória do sistema */
+
+/* Séries: slots 1–3 da paleta validada (azul, laranja, água), passo claro/escuro. */
+.sysmem { --s1: #257de0; --s2: #f47230; --s3: #00b894; }
+@media (prefers-color-scheme: dark) { .sysmem { --s1: #338ced; --s2: #e76624; --s3: #00a888; } }
+.sysmem .facts { margin-bottom: 8px; }
+.sysmem-chart { position: relative; }
+.sysmem-chart svg { display: block; overflow: visible; }
+.sysmem-chart .grid { stroke: var(--border); stroke-width: 1; }
+.sysmem-chart .limit { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.sysmem-chart .axis { fill: var(--muted); font-size: 10.5px; font-family: var(--mono); }
+.sysmem-chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sysmem-chart .area { stroke: none; opacity: 0.14; }
+.sysmem-chart .end { stroke: var(--surface); stroke-width: 2; }
+.sysmem-chart .cross { stroke: var(--muted); stroke-width: 1; }
+.sysmem-chart .s1 { stroke: var(--s1); } .sysmem-chart .area.s1, .sysmem-chart .end.s1 { fill: var(--s1); }
+.sysmem-chart .s2 { stroke: var(--s2); } .sysmem-chart .end.s2 { fill: var(--s2); }
+.sysmem-chart .s3 { stroke: var(--s3); } .sysmem-chart .end.s3 { fill: var(--s3); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.swatch.s1 { background: var(--s1); } .swatch.s2 { background: var(--s2); } .swatch.s3 { background: var(--s3); }
+.sysmem-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 0; padding: 0; font-size: 12px; color: var(--text); }
+.sysmem-tip {
+  position: absolute; top: 4px; pointer-events: none; z-index: 2;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.2);
+  display: flex; flex-direction: column; gap: 2px; min-width: 180px;
+}
+.sysmem-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.sysmem-table th, .sysmem-table td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--border); font-family: var(--mono); }
+.sysmem-table th:first-child, .sysmem-table td:first-child { text-align: left; }
+.sysmem-table th { font-family: var(--sans); color: var(--muted); font-weight: 500; }

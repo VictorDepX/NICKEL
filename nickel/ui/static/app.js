@@ -1,18 +1,8 @@
-"use strict";
+import { renderMarkdown, escapeHtml } from "/static/markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const CHANNELS = { whatsapp: "whatsapp", voice: "voz", ui: "ui", lembrete: "lembrete" };
 let lastMessageId = null;
-let catalog = null;
-
-// Estados do pipeline de voz em PT-BR; o catálogo tem prioridade quando o estado vira uma fase.
-const VOICE_LABELS = { idle: "ocioso", listening: "ouvindo", transcribing: "transcrevendo", thinking: "pensando", speaking: "falando", error: "erro" };
-
-function voiceLabel(state) {
-  const phase = catalog && catalog.phases ? catalog.phases[`voice/${state}`] : null;
-  const label = phase && catalog.labels ? catalog.labels[phase] : null;
-  return (label || VOICE_LABELS[state] || state).toLowerCase();
-}
 
 function storageGet(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -40,10 +30,6 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-function escapeHtml(text) {
-  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
 function linkify(text) {
   return escapeHtml(text).replace(/https?:\/\/[^\s<]+/g, (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
 }
@@ -65,7 +51,7 @@ function li(html, className = "") {
 // ------------------------------------------------------------ fala
 // "Parar" aparece entre `tts/start` e `tts/done`/`tts/error`: o monitor.js recebe os eventos ao vivo (SSE)
 // e avisa com "nickel:speech". Ao clicar em "Ouvir", o botão aparece na hora, sem esperar o `tts/start`.
-const VOICE_OFF_TITLE = "Voz desligada: configure TTS_PROVIDER (VoiceStudio ou Piper) para ouvir as respostas.";
+const VOICE_OFF_TITLE = "Voz desligada: configure TTS_PROVIDER (edge, VoiceStudio ou Piper) para ouvir as respostas.";
 let voiceOn = true; // até /api/state dizer o contrário
 
 function showStop(visible) {
@@ -124,7 +110,7 @@ function renderMessages(messages) {
       ? `<div class="tools">${tools.map((t) => `${t.ok ? "✓" : "✗"} ${escapeHtml(t.name)}`).join(" · ")}</div>`
       : "";
     const item = li(
-      `<div class="bubble">${media.length ? escapeHtml(media.join(" ")) + " " : ""}${linkify(message.content)}</div>
+      `<div class="bubble${role === "assistant" ? " md" : ""}">${media.length ? escapeHtml(media.join(" ")) + " " : ""}${role === "assistant" ? renderMarkdown(message.content) : linkify(message.content)}</div>
        ${toolLine}
        <div class="meta"><span class="tag">${escapeHtml(CHANNELS[message.channel] || message.channel)}</span><span>${formatTime(message.created_at)}</span></div>`,
       `msg ${role}`,
@@ -199,28 +185,45 @@ function pill(label, level, title) {
   return item;
 }
 
+const LEVEL_TEXT = { ok: "funcionando", warn: "falta um passo", bad: "fora do ar" };
+
+// Uma linha por conector/pipeline configurado: ponto colorido + nome + detalhe (+ ação, se houver).
+function connectorRow(item) {
+  const row = li("", `row conn ${item.level}`);
+  const body = document.createElement("div");
+  const name = document.createElement("div");
+  name.className = "conn-name";
+  const dot = document.createElement("span");
+  dot.className = `conn-dot ${item.level}`;
+  dot.setAttribute("aria-hidden", "true");
+  name.append(dot, item.name);
+  const detail = document.createElement("div");
+  detail.className = "hint";
+  detail.textContent = [LEVEL_TEXT[item.level], item.detail].filter(Boolean).join(" · ");
+  body.append(name, detail);
+  row.append(body);
+  if (item.action) {
+    const link = document.createElement("a");
+    link.href = item.action;
+    link.innerHTML = '<button class="primary">Conectar</button>';
+    row.append(link);
+  }
+  return row;
+}
+
 function renderState(state) {
   setVoiceOn(Boolean(state.voice && state.voice.tts && state.voice.tts.provider));
   if (thinkChoice() === null && typeof state.think_default === "boolean") $("think").checked = state.think_default;
-  const status = $("status");
-  const level = (s) => (s === "ready" ? "ok" : s === "needs_connection" ? "warn" : "bad");
-  status.replaceChildren(
-    pill(`Modelo ${state.llm.model || ""}`.trim(), state.llm.ok && state.llm.model_present ? "ok" : "bad", state.llm.detail || ""),
-    pill("WhatsApp", state.whatsapp.ready ? "ok" : "bad", state.whatsapp.detail || state.whatsapp.host || ""),
-    pill("Google", level(state.google.status), state.google.message || ""),
-    pill("Spotify", level(state.spotify.status), state.spotify.message || ""),
-    pill("Obsidian", state.obsidian.available ? "ok" : "bad", state.obsidian.vault),
-    pill(`Voz${state.voice.state && state.voice.state !== "idle" ? ": " + voiceLabel(state.voice.state) : ""}`, state.voice.available ? "ok" : "warn"),
+  const connectors = state.connectors || [];
+  const pipelines = state.pipelines || [];
+  // Topo: só o que está configurado, com a mesma cor do painel.
+  $("status").replaceChildren(
+    ...connectors.map((item) => pill(item.name, item.level, [LEVEL_TEXT[item.level], item.detail].filter(Boolean).join(" · "))),
   );
-
-  const list = $("connections");
-  list.replaceChildren();
-  for (const [name, info, path] of [["Google (Gmail + Agenda)", state.google, "/auth/google/start"], ["Spotify", state.spotify, "/auth/spotify/start"]]) {
-    const ready = info.status === "ready";
-    const action = info.status === "needs_connection" ? `<a href="${path}"><button class="primary">Conectar</button></a>` : "";
-    list.append(li(`<div><div>${name}</div><div class="hint">${ready ? "conectado" : escapeHtml(info.message || info.status)}</div></div>${action}`, "row"));
-  }
-  list.append(li(`<div><div>Ferramentas ativas</div><div class="hint">${state.tools.length}: ${escapeHtml(state.tools.join(", "))}</div></div>`));
+  $("connections").replaceChildren(...connectors.map(connectorRow));
+  $("tools-line").textContent = state.tools && state.tools.length ? `Ferramentas ativas (${state.tools.length}): ${state.tools.join(", ")}` : "";
+  $("pipelines-panel").hidden = !pipelines.length;
+  $("pipelines").replaceChildren(...pipelines.map(connectorRow));
 }
 
 function renderAudit(items) {
@@ -332,8 +335,6 @@ document.querySelectorAll('[role="tab"]').forEach((tab, index, all) => {
 });
 
 showTab(storageGet("nickel.tab") || "conversa");
-
-api("/api/events/catalog").then((data) => { catalog = data; refreshState(); }).catch(() => {});
 
 refresh();
 refreshState();

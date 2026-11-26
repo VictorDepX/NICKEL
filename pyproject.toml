@@ -19,6 +19,7 @@ dependencies = [
   "google-auth-oauthlib>=1.2",
   "google-api-python-client>=2.147",
   "tzdata>=2024.1; sys_platform == 'win32'",
+  "psutil>=5.9",
 ]
 
 [project.optional-dependencies]

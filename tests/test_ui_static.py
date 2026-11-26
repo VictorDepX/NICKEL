@@ -79,4 +79,4 @@ def test_app_sends_think_and_translates_voice_state():
     assert "think_default" in app_js  # sem escolha, a caixa mostra o padrão efetivo do servidor
     assert "think: true" not in app_js
     assert "localStorage" in app_js
-    assert "transcrevendo" in app_js
+    assert "Transcrevendo" in (STATIC_DIR / "monitor-core.js").read_text(encoding="utf-8")  # estado da voz vai para o status do chat
