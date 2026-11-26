@@ -21,7 +21,7 @@ UI local ─┘        │                           └─ Gmail / Google Agend
 | **Local (Linux)** | Linux com GPU NVIDIA de 24 GB | Ollama na mesma máquina | Seção abaixo |
 | **Local (Windows)** | PC Windows (8 GB de VRAM, 20 GB de RAM) | `llama-server` com Gemma 4 26B-A4B (MoE) | [`docs/deploy/local-windows-llamacpp.md`](docs/deploy/local-windows-llamacpp.md) |
 
-Voz falada pelo VoiceStudio (OmniVoice): [`docs/deploy/voicestudio.md`](docs/deploy/voicestudio.md).
+Voz falada: Edge TTS (`TTS_PROVIDER=edge`, padrão no PC: voz neural fixa, ~2 s por frase, precisa de internet e ffmpeg) ou VoiceStudio/OmniVoice ([`docs/deploy/voicestudio.md`](docs/deploy/voicestudio.md)).
 
 O modo é definido por `LLM_PROVIDER` no `.env`: `openai` para o RunPod ou outro provedor compatível, `ollama` para GPU local, `llamacpp` para o `llama-server`. Workspaces com `backend: cloud` podem usar o RunPod mesmo com o modelo local como padrão.
 
@@ -112,7 +112,7 @@ nickel/
   skills/        uma tool por função; cada módulo expõe register(registry)
   integrations/  Google, Spotify, música, Obsidian
   channels/      WhatsApp e voz
-  speech/        faster-whisper, Piper, microfone
+  speech/        faster-whisper, Edge TTS, VoiceStudio, Piper, microfone
   ui/static/     UI local
 whatsapp-bridge/ open-wa v5 → HTTP local
 docs/Nickel/     persona e políticas (canônicas)

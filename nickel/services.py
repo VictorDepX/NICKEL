@@ -69,7 +69,7 @@ class Services:
     whatsapp: Any = None
     outbound: Any = None
     reminders: Any = None
-    tts_provider: str | None = None  # "voicestudio" | "piper" | None (preenchido por build_services)
+    tts_provider: str | None = None  # "edge" | "voicestudio" | "piper" | None (preenchido por build_services)
     _tts_cache: tuple[float, dict[str, Any]] | None = field(default=None, init=False, repr=False)
     _speech: asyncio.Task | None = field(default=None, init=False, repr=False)
     _speech_gen: int = field(default=0, init=False, repr=False)
@@ -190,6 +190,8 @@ class Services:
         provider = self._provider_name()
         if provider == "voicestudio":
             voice = self.settings.voicestudio_voice
+        elif provider == "edge":
+            voice = self.settings.edge_tts_voice
         else:
             voice = self.settings.tts_voice_path.name if self.settings.tts_voice_path else ""
         chars = len(text)
@@ -247,7 +249,7 @@ class Services:
         return self.spotify is not None and not self.spotify.missing_config()
 
 
-TTS_CHOICES = ("auto", "voicestudio", "piper", "none")
+TTS_CHOICES = ("auto", "edge", "voicestudio", "piper", "none")
 
 
 def resolve_tts_provider(settings: Settings) -> str | None:
@@ -259,6 +261,8 @@ def resolve_tts_provider(settings: Settings) -> str | None:
         return None
     if choice == "voicestudio":
         return "voicestudio"
+    if choice == "edge":
+        return "edge"
     if choice == "piper":
         return "piper" if settings.tts_voice_path else None
     if settings.voicestudio_url:
@@ -295,6 +299,10 @@ def build_services(settings: Settings, llm: LLMClient | None = None) -> Services
         from nickel.speech.voicestudio import VoiceStudioSpeaker
 
         services.tts = VoiceStudioSpeaker(settings, settings.data_dir / "tmp")
+    elif provider == "edge":
+        from nickel.speech.edge import EdgeSpeaker
+
+        services.tts = EdgeSpeaker(settings, settings.data_dir / "tmp")
     elif provider == "piper" and module_available("piper"):
         from nickel.speech.tts import PiperSpeaker
 

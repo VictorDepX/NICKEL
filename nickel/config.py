@@ -103,7 +103,9 @@ class Settings:
     stt_compute_type: str = "int8_float16"
     stt_language: str = "pt"
     tts_voice_path: Path | None = None
-    tts_provider: str = "auto"  # auto | voicestudio | piper | none
+    tts_provider: str = "auto"  # auto | edge | voicestudio | piper | none
+    edge_tts_voice: str = "pt-BR-AntonioNeural"
+    edge_tts_rate: str = "+0%"
     voicestudio_url: str = ""
     voicestudio_api_key: str = ""
     voicestudio_model: str = "omnivoice"
@@ -191,6 +193,8 @@ class Settings:
             stt_language=_str(env, "STT_LANGUAGE", cls.stt_language),
             tts_voice_path=Path(voice).expanduser() if voice else None,
             tts_provider=_str(env, "TTS_PROVIDER", cls.tts_provider).lower(),
+            edge_tts_voice=_str(env, "EDGE_TTS_VOICE", cls.edge_tts_voice),
+            edge_tts_rate=_str(env, "EDGE_TTS_RATE", cls.edge_tts_rate),
             voicestudio_url=_str(env, "VOICESTUDIO_URL", cls.voicestudio_url),
             voicestudio_api_key=_str(env, "VOICESTUDIO_API_KEY", cls.voicestudio_api_key),
             voicestudio_model=_str(env, "VOICESTUDIO_MODEL", cls.voicestudio_model),

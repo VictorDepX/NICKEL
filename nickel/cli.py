@@ -167,6 +167,9 @@ async def _doctor() -> int:
             line(False, f"VoiceStudio em {url}", "abra o app VoiceStudio")
         else:
             line(False, f"VoiceStudio em {url}", tts_health.get("detail") or "resposta inesperada")
+    elif provider == "edge":
+        line(module_available("edge_tts"), f"edge-tts (voz {settings.edge_tts_voice})", "pip install edge-tts")
+        line(bool(shutil.which("ffmpeg")), "ffmpeg (converte a voz do Edge)", "winget install Gyan.FFmpeg")
     elif provider == "piper":
         line(module_available("piper"), "piper-tts (TTS)", "pip install -e '.[voice]'")
         voice_ok = bool(settings.tts_voice_path and settings.tts_voice_path.exists())

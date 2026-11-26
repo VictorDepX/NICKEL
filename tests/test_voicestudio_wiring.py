@@ -143,7 +143,7 @@ def test_doctor_flags_invalid_tts_provider(monkeypatch, tmp_path, capsys):
     _doctor_env(monkeypatch, tmp_path, TTS_PROVIDER="elevenlabs")
     main(["doctor"])
     out = capsys.readouterr().out
-    assert "[!!] TTS_PROVIDER inválido: elevenlabs (use auto|voicestudio|piper|none)" in out
+    assert "[!!] TTS_PROVIDER inválido: elevenlabs (use auto|edge|voicestudio|piper|none)" in out
 
 
 def test_doctor_reports_voice_off_when_provider_none(monkeypatch, tmp_path, capsys):

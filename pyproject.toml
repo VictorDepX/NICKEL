@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 voice = [
+  "edge-tts>=7.0",
   "faster-whisper>=1.1",
   "piper-tts>=1.3",
   "sounddevice>=0.5",
@@ -33,6 +34,7 @@ music = [
   "yt-dlp>=2025.1.1",
 ]
 server = [
+  "edge-tts>=7.0",
   "faster-whisper>=1.1",
   "piper-tts>=1.3",
   "shazamio>=0.7",
