@@ -430,9 +430,8 @@ export function chatStatus(state, nowMs) {
       detail = `${num(state.reasoning.chars)} caracteres de raciocínio`;
     } else if (afterTool) {
       text = `Analisando o resultado de ${toolDone.name}`;
-    } else if (state.think === true) {
-      text = "Pensando";
     } else {
+      // Com "pensar" ligado o modelo pode pular o raciocínio; "Pensando" só quando ele chega.
       text = "Lendo o pedido";
     }
   }

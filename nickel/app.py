@@ -170,6 +170,14 @@ def create_app(
                     await client.aclose()
 
     app = FastAPI(title="NICKEL", version=VERSION, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def revalidate_ui(request, call_next):
+        # A GUI muda a cada atualização do NICKEL: o navegador sempre revalida (ETag) em vez de usar cópia velha.
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
     app.state.services = services
     app.state.agent = agent
     app.state.registry = registry

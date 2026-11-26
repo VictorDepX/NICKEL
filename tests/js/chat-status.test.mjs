@@ -28,6 +28,11 @@ test("lendo o pedido sem pensar, com tempo desde o início do turno", () => {
   assert.deepEqual(chatStatus(s, T0 + 4000), { active: true, phase: "thinking", text: "Lendo o pedido", detail: "", elapsedMs: 4000 });
 });
 
+test("pensar ligado sem raciocínio ainda não diz Pensando", () => {
+  const s = feed([ev("turn", "ui", "start", 0), ev("llm", "m", "start", 1, { think: true })]);
+  assert.equal(chatStatus(s, T0 + 2000).text, "Lendo o pedido");
+});
+
 test("pensando com raciocínio em curso mostra os caracteres", () => {
   const s = feed([ev("turn", "ui", "start", 0), ev("llm", "m", "start", 1, { think: true }), ev("reasoning", "model", "progress", 2, { step: 0, chars: 1234, tail: "abc" })]);
   const st = chatStatus(s, T0 + 3000);
