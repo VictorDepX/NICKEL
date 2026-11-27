@@ -52,6 +52,7 @@
   --chart-4: #b9a7f5;
   --chart-5: #e7b16b;
   --radius: 12px;
+  --radius-full: 999px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-fast: 120ms;
   --dur: 180ms;
@@ -113,10 +114,17 @@
   --radius-lg: 12px;
   --radius-xl: 18px;
   --radius-2xl: 24px;
+  --radius-full: 999px;
 
   --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
   --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes nk-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @layer base {
