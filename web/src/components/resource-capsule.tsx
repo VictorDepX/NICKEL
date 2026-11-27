@@ -10,6 +10,7 @@ import {
   useReminders,
 } from "@/hooks/use-shell-data";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { RAM_COLOR, RingGauge, SplitRing, ramLevel } from "@/components/ring-gauge";
 import { StatusDot } from "@/components/status-dot";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /** Cápsula de recursos: anéis de RAM, contexto e conexões; expande para um painel de 300 px. */
-export function ResourceCapsule({ className }: { className?: string }) {
+export function ResourceCapsule({ className, inSheet = false }: { className?: string; inSheet?: boolean }) {
   const [open, setOpen] = useState(false);
   const { data: appState } = useAppState();
   const { data: reminders } = useReminders();
@@ -46,7 +47,7 @@ export function ResourceCapsule({ className }: { className?: string }) {
     llm?.promptTokens != null ? Math.min(100, (llm.promptTokens / CONTEXT_WINDOW) * 100) : null;
   const next = nextReminder(reminders);
 
-  if (!open) {
+  if (!open && !inSheet) {
     return (
       <aside aria-label="Recursos" className={cn("flex w-[84px] flex-col items-center gap-4 rounded-[42px] border border-sidebar-border bg-popover pt-4 pb-3 shadow-lg", className)}>
         <RingGauge
@@ -86,13 +87,15 @@ export function ResourceCapsule({ className }: { className?: string }) {
   const pct = (part: number) => (memory && memory.total > 0 ? `${(part / memory.total) * 100}%` : "0%");
 
   return (
-    <aside aria-label="Recursos" className={cn("flex w-[300px] flex-col gap-3 p-4", panel, className)}>
-      <div className="flex items-center justify-between">
-        <h2 className="pl-1 text-[13px] font-medium">Recursos</h2>
-        <Button variant="ghost" size="icon" className="size-11 rounded-full text-muted-foreground" aria-label="Recolher painel" onClick={() => setOpen(false)}>
-          <ChevronRight className="size-[18px]" strokeWidth={1.7} />
-        </Button>
-      </div>
+    <aside aria-label="Recursos" className={cn("flex flex-col gap-3 p-4", inSheet ? "w-full" : cn("w-[300px]", panel), className)}>
+      {inSheet ? null : (
+        <div className="flex items-center justify-between">
+          <h2 className="pl-1 text-[13px] font-medium">Recursos</h2>
+          <Button variant="ghost" size="icon" className="size-11 rounded-full text-muted-foreground" aria-label="Recolher painel" onClick={() => setOpen(false)}>
+            <ChevronRight className="size-[18px]" strokeWidth={1.7} />
+          </Button>
+        </div>
+      )}
 
       <Section title="Memória RAM">
         {memory ? (
@@ -147,5 +150,33 @@ export function ResourceCapsule({ className }: { className?: string }) {
         </ul>
       </Section>
     </aside>
+  );
+}
+
+/** No celular: botão no cabeçalho com o anel de RAM; abre o painel de recursos numa gaveta à direita. */
+export function ResourceButton() {
+  const memory = useLatestMemory();
+  const ramPercent = memory && memory.total > 0 ? (memory.used / memory.total) * 100 : null;
+  const lvl = ramPercent === null ? "ok" : ramLevel(ramPercent);
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="ghost" className="size-11 rounded-full p-0" aria-label="Recursos do sistema">
+          <RingGauge
+            compact
+            percent={ramPercent}
+            color={RAM_COLOR[lvl]}
+            ariaLabel={ramPercent === null ? "Memória RAM: sem dados" : `Memória RAM: ${Math.round(ramPercent)}%`}
+          />
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="right" className="w-[340px] max-w-[92vw] overflow-y-auto bg-popover">
+        <SheetHeader className="pb-0">
+          <SheetTitle>Recursos</SheetTitle>
+          <SheetDescription className="sr-only">Memória, modelo, lembretes e conectores.</SheetDescription>
+        </SheetHeader>
+        <ResourceCapsule inSheet />
+      </SheetContent>
+    </Sheet>
   );
 }

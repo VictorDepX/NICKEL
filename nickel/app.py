@@ -324,13 +324,19 @@ def create_app(
         return services.reminders.upcoming(50)
 
     @app.post("/api/reminders", status_code=201)
-    async def create_reminder(payload: dict[str, Any]) -> dict[str, Any]:
+    async def create_reminder(request: Request) -> dict[str, Any]:
+        try:
+            payload = await request.json()
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            raise HTTPException(422, "Envie um objeto JSON com text, when e repeat.")
         service = services.reminders
         text = str(payload.get("text") or "").strip()
         if not text:
             raise HTTPException(422, "Escreva o que lembrar.")
         repeat = payload.get("repeat") or "none"
-        if repeat not in REPEATS:
+        if not isinstance(repeat, str) or repeat not in REPEATS:
             raise HTTPException(422, "Repetição inválida: use nenhuma, diária, semanal ou mensal.")
         try:
             when = parse_when_or_clock(str(payload.get("when") or ""), service.tz)

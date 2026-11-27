@@ -7,7 +7,8 @@ export default defineConfig({
   base: "/static/",
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
-  build: { outDir: "../nickel/ui/static", emptyOutDir: true },
+  // O chunk do markdown (Streamdown + shiki) passa de 500 kB, mas só carrega sob demanda.
+  build: { outDir: "../nickel/ui/static", emptyOutDir: true, chunkSizeWarningLimit: 600 },
   server: { proxy: { "/api": "http://127.0.0.1:8000" } },
   test: {
     environment: "jsdom",

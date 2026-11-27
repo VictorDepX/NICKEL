@@ -146,12 +146,20 @@ Os testes usam dublês para o LLM, o WhatsApp, o Spotify e o reconhecimento; nã
 
 MIT.
 
-## GUI (React)
+## GUI (web/)
 
-O código da interface fica em `web/` (Vite + React + TypeScript + Tailwind v4 + shadcn/ui).
-O build é escrito em `nickel/ui/static/` e vai para o git:
+A interface fica em `web/` (Vite + React + TypeScript + Tailwind v4 + shadcn/ui + AI Elements). O FastAPI serve o build em `/`.
 
+```bash
+cd web
+npm install
+npm run dev     # Vite em http://localhost:5173, com proxy de /api para 127.0.0.1:8000
+npm test        # Vitest + jsdom
+npm run build   # tsc -b + vite build, escreve em nickel/ui/static/
 ```
-cd web && npm ci && npm run build
-npm test
-```
+
+Para desenvolver, deixe o NICKEL rodando em `127.0.0.1:8000` e abra o endereço do Vite: as chamadas a `/api` vão para o backend.
+
+O build (`nickel/ui/static/`) **vai para o git**, então o PC não precisa de Node: rode `npm run build` antes de commitar mudanças em `web/`. Não edite os arquivos de `nickel/ui/static/` à mão.
+
+Ao adicionar componentes com `npx shadcn add`, confira os imports: a CLI pode gerar `import { cn } from "cn"` (o certo é `"@/lib/utils"`). Um teste (`web/src/guard.test.ts`) falha se isso acontecer.

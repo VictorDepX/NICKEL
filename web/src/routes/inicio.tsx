@@ -235,9 +235,9 @@ export default function Inicio() {
   return (
     <section
       aria-label="Início"
-      className="min-h-svh bg-[radial-gradient(ellipse_50%_42%_at_56%_30%,#141a22_0%,transparent_70%)]"
+      className="min-h-[calc(100svh-53px)] md:min-h-svh bg-[radial-gradient(ellipse_50%_42%_at_56%_30%,#141a22_0%,transparent_70%)]"
     >
-      <div className="mx-auto flex min-h-svh w-full max-w-[980px] flex-col gap-5 pt-[30px] pr-4 pb-7 pl-4 md:pr-32 md:pl-11">
+      <div className="mx-auto flex min-h-[calc(100svh-53px)] w-full md:min-h-svh max-w-[980px] flex-col gap-5 pt-[30px] pr-4 pb-7 pl-4 md:pr-32 md:pl-11">
         <div className="flex items-center justify-between text-[12.5px] text-subtle-foreground">
           <span>{longDate(now)}</span>
           <span className="font-mono">{hhmm(now)}</span>

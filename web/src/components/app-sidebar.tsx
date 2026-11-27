@@ -47,7 +47,7 @@ export function swatchColor(id: string, index: number): string {
 }
 
 const itemClass =
-  "h-auto min-h-10 gap-[11px] rounded-[10px] px-3 py-0 text-muted-foreground hover:bg-muted hover:text-foreground " +
+  "h-auto min-h-11 gap-[11px] md:min-h-10 rounded-[10px] px-3 py-0 text-muted-foreground hover:bg-muted hover:text-foreground " +
   "data-[active=true]:bg-sidebar-accent data-[active=true]:font-normal data-[active=true]:text-foreground " +
   "data-[active=true]:shadow-[inset_0_0_0_1px_#26282f] [&>svg]:size-[18px] " +
   "group-data-[collapsible=icon]:size-11! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0!";

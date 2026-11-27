@@ -99,8 +99,8 @@ export default function Monitor() {
           >
             Só erros
           </Toggle>
-          {state.runId ? (
-            <a href={runReportUrl(state.runId)} download="" className={SECONDARY_BUTTON}>
+          {activeRun ? (
+            <a href={runReportUrl(activeRun)} download="" className={SECONDARY_BUTTON}>
               <DownloadIcon aria-hidden="true" className="size-4" />
               Baixar relatório
             </a>

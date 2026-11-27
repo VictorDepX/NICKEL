@@ -20,8 +20,8 @@ import {
   XIcon,
 } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
-import { createContext, memo, useContext, useEffect, useState } from "react";
-import { Streamdown, type StreamdownTranslations } from "streamdown";
+import type { MarkdownProps } from "./markdown";
+import { Suspense, createContext, lazy, memo, useContext, useEffect, useState } from "react";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -304,43 +304,18 @@ export const MessageBranchPage = ({
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = MarkdownProps;
 
-/** Rótulos dos controles do Streamdown (copiar código, tabelas, links) em português. */
-export const STREAMDOWN_PT: Partial<StreamdownTranslations> = {
-  close: "Fechar",
-  copied: "Copiado",
-  copyCode: "Copiar código",
-  copyLink: "Copiar link",
-  copyTable: "Copiar tabela",
-  copyTableAsCsv: "Copiar como CSV",
-  copyTableAsMarkdown: "Copiar como Markdown",
-  copyTableAsTsv: "Copiar como TSV",
-  downloadFile: "Baixar arquivo",
-  downloadImage: "Baixar imagem",
-  downloadTable: "Baixar tabela",
-  downloadTableAsCsv: "Baixar como CSV",
-  downloadTableAsMarkdown: "Baixar como Markdown",
-  externalLinkWarning: "Este link abre fora do NICKEL.",
-  imageNotAvailable: "Imagem indisponível",
-  openExternalLink: "Abrir link externo",
-  openLink: "Abrir link",
-  exitFullscreen: "Sair da tela cheia",
-  viewFullscreen: "Tela cheia",
-};
+// Streamdown (markdown + shiki) é pesado: carrega sob demanda, com o texto puro enquanto isso.
+const LazyMarkdown = lazy(() => import("./markdown"));
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-ice [&_a]:underline-offset-2 [&_pre]:max-w-full [&_pre]:overflow-x-auto",
-        className
-      )}
-      // Links vêm da própria resposta do NICKEL (local): abrem direto, sem o aviso do Streamdown.
-      linkSafety={{ enabled: false }}
-      translations={STREAMDOWN_PT}
-      {...props}
-    />
+  ({ className, children, ...props }: MessageResponseProps) => (
+    <Suspense fallback={<div className={cn("size-full break-words whitespace-pre-wrap", className)}>{children}</div>}>
+      <LazyMarkdown className={className} {...props}>
+        {children}
+      </LazyMarkdown>
+    </Suspense>
   ),
   (prevProps, nextProps) => prevProps.children === nextProps.children
 );

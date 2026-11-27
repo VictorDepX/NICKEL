@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { memLevel, MemoryCard } from "@/components/monitor/memory-card";
+import { memLevel, MemoryCard, timeDomain } from "@/components/monitor/memory-card";
 import { applyEvent, initialState, type AuditEvent, type Catalog, type MonitorState } from "@/lib/monitor-core";
 import type { SystemMemorySample } from "@/lib/api";
 import { renderWithProviders } from "@/test-utils";
@@ -163,4 +163,16 @@ test("memória indisponível mostra aviso em vez do gráfico", async () => {
   vi.mocked(api.getSystemMemory).mockResolvedValue({ available: false, samples: [], interval_s: 5 });
   renderWithProviders(<MemoryCard />);
   expect(await screen.findByText("Leitura de memória indisponível neste sistema.")).toBeInTheDocument();
+});
+
+test("o link de relatório do cabeçalho segue a execução selecionada", async () => {
+  renderWithProviders(<Monitor />, "/monitor");
+  fireEvent.click(await screen.findByRole("button", { name: "Ver execução bbbbbbbb" }));
+  await waitFor(() => expect(api.getRun).toHaveBeenCalledWith(OLD));
+  expect(screen.getByRole("link", { name: "Baixar relatório" })).toHaveAttribute("href", `/api/runs/${OLD}/report.md`);
+});
+
+test("o eixo de tempo da memória vem dos dados", () => {
+  expect(timeDomain([{ t: 1000 }, { t: 1300 }, { t: 1900 }])).toEqual([1000, 1900]);
+  expect(timeDomain([{ t: 1000 }])).toEqual([940, 1000]);
 });

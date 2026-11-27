@@ -207,3 +207,17 @@ def test_post_reminder_rejects_bad_or_past_time(client):
     assert out_of_range.status_code == 422
     past = client.post("/api/reminders", json={"text": "x", "when": "2020-01-01T10:00"})
     assert past.status_code == 422 and "já passou" in past.json()["detail"]
+
+
+def test_post_reminder_rejects_invalid_repeat(client):
+    for repeat in ("sempre", ["daily"], 3):
+        response = client.post("/api/reminders", json={"text": "x", "when": "23:59", "repeat": repeat})
+        assert response.status_code == 422
+        assert "Repetição inválida" in response.json()["detail"]
+
+
+def test_post_reminder_rejects_non_object_body(client):
+    for body in ([], "texto", 5, None):
+        response = client.post("/api/reminders", json=body)
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Envie um objeto JSON com text, when e repeat."

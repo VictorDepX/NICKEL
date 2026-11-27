@@ -9,9 +9,10 @@ import {
 import { cn } from "@/lib/utils";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { createContext, memo, useContext, useEffect, useState } from "react";
-import { Streamdown } from "streamdown";
+import { Suspense, createContext, lazy, memo, useContext, useEffect, useState } from "react";
 import { Shimmer } from "./shimmer";
+
+const LazyMarkdown = lazy(() => import("./markdown"));
 
 type ReasoningContextValue = {
   isStreaming: boolean;
@@ -170,7 +171,9 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown>{children}</Streamdown>
+      <Suspense fallback={<div className="whitespace-pre-wrap">{children}</div>}>
+        <LazyMarkdown>{children}</LazyMarkdown>
+      </Suspense>
     </CollapsibleContent>
   )
 );

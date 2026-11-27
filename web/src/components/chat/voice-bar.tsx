@@ -33,7 +33,7 @@ export function VoiceBar({ onStop, className }: { onStop: () => void; className?
       <Button
         variant="outline"
         size="sm"
-        className="ml-auto min-h-9 rounded-full border-phase-speaking/40 bg-transparent text-[#fed7aa] hover:bg-phase-speaking/15"
+        className="ml-auto min-h-11 rounded-full md:min-h-9 border-phase-speaking/40 bg-transparent text-[#fed7aa] hover:bg-phase-speaking/15"
         onClick={onStop}
       >
         <SquareIcon className="size-3 fill-current" aria-hidden="true" />

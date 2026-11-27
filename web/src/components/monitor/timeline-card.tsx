@@ -223,7 +223,7 @@ export function TimelineCard({
               pressed={!hiddenKinds.has(kind)}
               onPressedChange={() => onToggleKind(kind)}
               title={catalog.kinds?.[kind]?.description}
-              className="h-auto min-h-8 rounded-full border border-input px-2.5 font-mono text-[11.5px] text-subtle-foreground line-through hover:bg-muted data-[state=on]:border-[#2e3a47] data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:no-underline"
+              className="h-auto min-h-11 rounded-full border border-input px-2.5 md:min-h-8 font-mono text-[11.5px] text-subtle-foreground line-through hover:bg-muted data-[state=on]:border-[#2e3a47] data-[state=on]:bg-accent data-[state=on]:text-accent-foreground data-[state=on]:no-underline"
             >
               {kind}
             </Toggle>

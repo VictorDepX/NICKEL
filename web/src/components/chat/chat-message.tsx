@@ -109,7 +109,7 @@ export function ChatMessage({ message, durationMs, tokensPerSecond, voiceOn = tr
               tooltip={voiceOn ? "Ouça esta resposta em voz alta" : VOICE_OFF_TITLE}
               disabled={!voiceOn}
               onClick={() => onListen?.(text)}
-              className="h-8 w-auto gap-1 px-2 text-xs text-muted-foreground"
+              className="h-11 min-w-11 w-auto gap-1 px-2 text-xs md:h-8 md:min-w-0 text-muted-foreground"
             >
               <Volume2Icon className="size-3.5" aria-hidden="true" />
               <span aria-hidden="true">Ouvir</span>
@@ -118,7 +118,7 @@ export function ChatMessage({ message, durationMs, tokensPerSecond, voiceOn = tr
               label="Copiar"
               tooltip="Copiar a resposta"
               onClick={() => onCopy?.(text)}
-              className="h-8 w-auto gap-1 px-2 text-xs text-muted-foreground"
+              className="h-11 min-w-11 w-auto gap-1 px-2 text-xs md:h-8 md:min-w-0 text-muted-foreground"
             >
               <CopyIcon className="size-3.5" aria-hidden="true" />
               <span aria-hidden="true">Copiar</span>

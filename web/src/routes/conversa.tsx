@@ -239,7 +239,7 @@ export default function Conversa() {
   const speaking = state.phase === "speaking";
 
   return (
-    <section className="flex h-svh min-h-0 flex-col md:pr-32" aria-label="Conversa">
+    <section className="flex h-[calc(100svh-53px)] min-h-0 flex-col md:h-svh md:pr-32" aria-label="Conversa">
       <header className="flex flex-wrap items-center gap-3 border-b border-border-soft px-4 py-3 md:px-6">
         <Orb size={44} phase={state.phase} />
         <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight">

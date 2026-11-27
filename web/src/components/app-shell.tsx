@@ -1,8 +1,11 @@
 import { Outlet, useLocation } from "react-router";
 import { useState } from "react";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { ResourceCapsule } from "@/components/resource-capsule";
+import { PanelLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ResourceButton, ResourceCapsule } from "@/components/resource-capsule";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const STORAGE_KEY = "nickel.sidebar.open";
 const CAPSULE_ROUTES = new Set(["/", "/conversa"]);
@@ -15,10 +18,25 @@ function readOpen(): boolean {
   }
 }
 
+/** Cabeçalho do celular (< md): botão do menu à esquerda e, em Início e Conversa, o anel de RAM à direita. */
+function MobileHeader({ withResources }: { withResources: boolean }) {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <header className="flex shrink-0 items-center justify-between border-b border-border px-2 py-1">
+      <Button variant="ghost" size="icon" className="size-11 rounded-lg text-muted-foreground" aria-label="Abrir menu" onClick={() => setOpenMobile(true)}>
+        <PanelLeft className="size-[18px]" strokeWidth={1.7} />
+      </Button>
+      {withResources ? <ResourceButton /> : null}
+    </header>
+  );
+}
+
 /** Menu à esquerda (estado guardado), conteúdo da rota e, em Início e Conversa, a cápsula à direita. */
 export function AppShell() {
   const [open, setOpen] = useState(readOpen);
   const { pathname } = useLocation();
+  const isMobile = useIsMobile();
+  const withCapsule = CAPSULE_ROUTES.has(pathname);
 
   return (
     <SidebarProvider
@@ -35,8 +53,9 @@ export function AppShell() {
     >
       <AppSidebar />
       <SidebarInset className="relative min-w-0">
+        {isMobile ? <MobileHeader withResources={withCapsule} /> : null}
         <Outlet />
-        {CAPSULE_ROUTES.has(pathname) ? (
+        {withCapsule && !isMobile ? (
           <div className="absolute top-1/2 right-4 z-10 hidden -translate-y-1/2 md:block">
             <ResourceCapsule />
           </div>

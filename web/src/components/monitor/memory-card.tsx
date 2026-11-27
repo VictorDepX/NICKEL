@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 import { CARD, CARD_TITLE, HINT, clockTime } from "./shared";
 
 const GIB = 1024 ** 3;
-const WINDOW_S = 30 * 60;
 const TABLE_ROWS = 12;
 
 export const MEM_SERIES = [
@@ -86,20 +85,29 @@ const minutesAgo = (lastT: number) => (t: number) => {
   return minutes <= 0 ? "agora" : `há ${minutes} min`;
 };
 
+/** Eixo X a partir dos dados: do primeiro ao último instante lido (uma amostra só ganha 1 min de folga). */
+export function timeDomain(samples: Pick<SystemMemorySample, "t">[]): [number, number] {
+  const end = samples[samples.length - 1].t;
+  const begin = samples[0].t;
+  return [begin === end ? end - 60 : begin, end];
+}
+
 function MemChart({ samples }: { samples: SystemMemorySample[] }) {
   const last = samples[samples.length - 1];
   const totalGb = last.total / GIB;
-  const data = samples.filter((s) => s.t >= last.t - WINDOW_S).map(toGb);
+  const data = samples.map(toGb);
+  const [start] = timeDomain(samples);
+  const spanMin = Math.max(1, Math.round((last.t - start) / 60));
   const step = totalGb > 24 ? 8 : 4;
   const yTicks: number[] = [];
   for (let g = 0; g <= totalGb + 0.01; g += step) yTicks.push(g);
-  const xTicks = [30, 20, 10, 0].map((m) => last.t - m * 60);
+  const xTicks = [1, 0.67, 0.33, 0].map((f) => Math.round(last.t - f * (last.t - start)));
 
   return (
     <ChartContainer
       config={chartConfig}
       role="img"
-      aria-label="Uso de memória RAM nos últimos 30 minutos"
+      aria-label={`Uso de memória RAM nos últimos ${spanMin} min`}
       className="aspect-auto h-[190px] w-full"
     >
       <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -107,7 +115,7 @@ function MemChart({ samples }: { samples: SystemMemorySample[] }) {
         <XAxis
           dataKey="t"
           type="number"
-          domain={[last.t - WINDOW_S, last.t]}
+          domain={[start, last.t]}
           ticks={xTicks}
           tickFormatter={minutesAgo(last.t)}
           tickLine={false}
@@ -199,7 +207,7 @@ function Fact({ term, value }: { term: string; value: string }) {
   );
 }
 
-/** Memória do sistema: fatos da última leitura, nível de folga, gráfico de 30 min, legenda e tabela. */
+/** Memória do sistema: fatos da última leitura, nível de folga, gráfico do período lido, legenda e tabela. */
 export function MemoryCard({ className }: { className?: string }) {
   const { data } = useQuery({ queryKey: SYSTEM_MEMORY_KEY, queryFn: getSystemMemory, refetchInterval: 5000 });
   const samples = data?.available ? data.samples : [];

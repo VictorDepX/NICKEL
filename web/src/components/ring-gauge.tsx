@@ -26,13 +26,14 @@ interface FrameProps {
   caption?: string;
   ariaLabel: string;
   children: ReactNode;
+  compact?: boolean;
 }
 
-function Frame({ label, caption, ariaLabel, children }: FrameProps) {
+function Frame({ label, caption, ariaLabel, children, compact }: FrameProps) {
   return (
     <div className="flex flex-col items-center gap-1 text-[11.5px] text-muted-foreground">
-      <div role="img" aria-label={ariaLabel} className="relative size-[50px]">
-        <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="-rotate-90" aria-hidden="true">
+      <div role="img" aria-label={ariaLabel} className={compact ? "relative size-10" : "relative size-[50px]"}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${SIZE} ${SIZE}`} className="-rotate-90" aria-hidden="true">
           <circle cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} fill="none" stroke={TRACK} strokeWidth={STROKE} />
           {children}
         </svg>
@@ -49,12 +50,14 @@ interface RingGaugeProps {
   color: string;
   caption?: string;
   ariaLabel: string;
+  /** Versão de 40 px para o cabeçalho no celular. */
+  compact?: boolean;
 }
 
-export function RingGauge({ percent, color, caption, ariaLabel }: RingGaugeProps) {
+export function RingGauge({ percent, color, caption, ariaLabel, compact }: RingGaugeProps) {
   const value = percent === null ? 0 : Math.min(100, Math.max(0, percent));
   return (
-    <Frame label={percent === null ? "—" : `${Math.round(value)}%`} caption={caption} ariaLabel={ariaLabel}>
+    <Frame label={percent === null ? "—" : `${Math.round(value)}%`} caption={caption} ariaLabel={ariaLabel} compact={compact}>
       <circle
         data-arc
         cx={SIZE / 2}
