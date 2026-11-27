@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BrainIcon, MicIcon, Volume2Icon } from "lucide-react";
+import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
   Conversation,
@@ -52,7 +53,7 @@ export const PREFERENCES_KEY = ["preferences"] as const;
 // null enquanto não mexe, e aí o servidor decide (workspace ativo ou LLM_THINK).
 const THINK_KEY = "nickel.think";
 
-function readThink(): boolean | null {
+export function readThink(): boolean | null {
   try {
     const stored = localStorage.getItem(THINK_KEY);
     return stored === "1" ? true : stored === "0" ? false : null;
@@ -61,7 +62,7 @@ function readThink(): boolean | null {
   }
 }
 
-function writeThink(value: boolean) {
+export function writeThink(value: boolean) {
   try {
     localStorage.setItem(THINK_KEY, value ? "1" : "0");
   } catch {
@@ -104,6 +105,8 @@ function ErrorCard({ title, message }: { title: string; message: string }) {
 
 export default function Conversa() {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { state, connected } = useEvents();
   const { data: appState } = useAppState();
   const { data: workspaces } = useWorkspaces();
@@ -197,6 +200,17 @@ export default function Conversa() {
       setSending(false);
     }
   };
+
+  // Rascunho vindo do Início: envia uma vez e limpa o estado da rota, para um reload não reenviar.
+  const draftSent = useRef(false);
+  const draft = (location.state as { draft?: unknown } | null)?.draft;
+  useEffect(() => {
+    if (typeof draft !== "string" || !draft.trim() || draftSent.current || preferences.isPending) return;
+    draftSent.current = true;
+    navigate(location.pathname, { replace: true, state: null });
+    void handleSubmit({ text: draft, files: [] });
+    // handleSubmit muda a cada render; o ref garante o envio único.
+  }, [draft, preferences.isPending]);
 
   // Ref (e não só estado): um clique duplo chega antes de o React desabilitar os botões.
   const resolvingRef = useRef(false);

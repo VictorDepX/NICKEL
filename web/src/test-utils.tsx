@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, type InitialEntry } from "react-router";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import type { AppState, ConnectorItem } from "@/lib/api";
 
@@ -27,7 +27,7 @@ export function appState(connectors: ConnectorItem[], over: Partial<AppState> = 
   };
 }
 
-export function renderWithProviders(ui: ReactElement, route = "/") {
+export function renderWithProviders(ui: ReactElement, route: InitialEntry = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>

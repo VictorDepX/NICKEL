@@ -229,3 +229,12 @@ test.each([
   expect(screen.queryByTestId("turn-activity")).not.toBeInTheDocument();
   expect(screen.queryByText("notes_search")).not.toBeInTheDocument();
 });
+
+test("rascunho vindo do Início é enviado uma vez, com o 'Pensar' atual, e o estado da rota é limpo", async () => {
+  localStorage.setItem("nickel.think", "1");
+  renderWithProviders(<Conversa />, { pathname: "/conversa", state: { draft: "que horas são?" } });
+  await waitFor(() => expect(api.sendChat).toHaveBeenCalledTimes(1));
+  expect(api.sendChat).toHaveBeenCalledWith(expect.objectContaining({ text: "que horas são?", think: true }));
+  await screen.findByText("Feito.");
+  expect(api.sendChat).toHaveBeenCalledTimes(1);
+});
