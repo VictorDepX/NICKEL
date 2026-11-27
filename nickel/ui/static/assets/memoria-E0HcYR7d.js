@@ -1,0 +1,1 @@
+import{gt as e}from"./index-CUTYA4oy.js";var t=e();function n(){return(0,t.jsx)(`section`,{className:`p-6`,children:(0,t.jsx)(`h1`,{className:`text-xl font-semibold tracking-tight`,children:`Memória`})})}export{n as default};

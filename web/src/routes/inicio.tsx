@@ -10,8 +10,8 @@ import { useEvents } from "@/hooks/use-events";
 import { PENDING_KEY, nextReminder, usePending, useReminders, useWorkspaces } from "@/hooks/use-shell-data";
 import { cancelPending, confirmPending, getMessages, toggleVoice, type PendingAction } from "@/lib/api";
 import { chatStatus } from "@/lib/monitor-core";
+import { MESSAGES_KEY, readThink, writeThink } from "@/lib/conversa-prefs";
 import { cn } from "@/lib/utils";
-import { MESSAGES_KEY, readThink, writeThink } from "./conversa";
 
 /** Nome usado na saudação. */
 export const USER_NAME = "Victor";
