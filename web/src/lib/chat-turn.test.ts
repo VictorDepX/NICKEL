@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { StoredMessage } from "./api";
-import { clock, pendingLocals, turnAnchor, turnView, type LocalMessage } from "./chat-turn";
+import { activityPlacement, clock, pendingLocals, turnAnchor, turnView, type LocalMessage } from "./chat-turn";
 import { applyEvent, initialState, type AuditEvent } from "./monitor-core";
 
 const T0 = Date.parse("2026-11-27T15:00:00Z");
@@ -89,4 +89,16 @@ test("mensagens locais somem quando o servidor grava uma igual mais nova", () =>
 test("cronômetro mm:ss", () => {
   expect(clock(65_400)).toBe("01:05");
   expect(clock(null)).toBe("");
+});
+
+test("blocos: âncora quando há resposta; no fim só turno da ui em curso", () => {
+  const ui = turnView(feed([ev("turn", "ui", "start", 0)]));
+  const zap = turnView(feed([ev("turn", "whatsapp", "start", 0)]));
+  const uiDone = turnView(feed([ev("turn", "ui", "start", 0), ev("turn", "ui", "error", 1)]));
+  expect(ui?.channel).toBe("ui");
+  expect(activityPlacement(ui, -1)).toBe("bottom");
+  expect(activityPlacement(zap, -1)).toBe("none");
+  expect(activityPlacement(zap, 3)).toBe("anchor");
+  expect(activityPlacement(uiDone, -1)).toBe("none");
+  expect(activityPlacement(null, -1)).toBe("none");
 });

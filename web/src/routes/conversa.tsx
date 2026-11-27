@@ -39,8 +39,9 @@ import {
   toggleVoice,
   ttsSpeak,
   ttsStop,
+  type PendingAction,
 } from "@/lib/api";
-import { lastServerId, pendingLocals, turnAnchor, turnView, type LocalMessage } from "@/lib/chat-turn";
+import { activityPlacement, lastServerId, pendingLocals, turnAnchor, turnView, type LocalMessage } from "@/lib/chat-turn";
 import { chatStatus, type AuditEvent } from "@/lib/monitor-core";
 import { cn } from "@/lib/utils";
 
@@ -189,7 +190,7 @@ export default function Conversa() {
       if (await syncMessages()) setLocals((prev) => prev.filter((m) => m.key !== mine.key));
     } catch (err) {
       setLocals((prev) => prev.filter((m) => m.key !== mine.key));
-      setText(value);
+      setText((current) => (current.trim() ? current : value)); // não apaga o que foi digitado durante o envio
       setError({ title: "Falha ao enviar", message: errorText(err) });
       void syncMessages();
     } finally {
@@ -197,19 +198,29 @@ export default function Conversa() {
     }
   };
 
+  // Ref (e não só estado): um clique duplo chega antes de o React desabilitar os botões.
+  const resolvingRef = useRef(false);
   const resolvePending = async (id: string, decision: "confirm" | "cancel") => {
+    if (resolvingRef.current) return;
+    resolvingRef.current = true;
     setBusyPending(id);
     setError(null);
     try {
       const reply = await (decision === "confirm" ? confirmPending(id) : cancelPending(id));
+      // Sai do cartão já: a ação foi resolvida, mesmo antes de /api/pending responder de novo.
+      queryClient.setQueryData<PendingAction[]>(PENDING_KEY, (items) => items?.filter((a) => a.id !== id));
       if (reply.text?.trim()) addLocal("assistant", reply.text);
     } catch (err) {
       setError({ title: decision === "confirm" ? "Falha ao confirmar" : "Falha ao cancelar", message: errorText(err) });
     } finally {
-      setBusyPending(null);
-      void queryClient.invalidateQueries({ queryKey: PENDING_KEY });
       void queryClient.invalidateQueries({ queryKey: APP_STATE_KEY });
       void syncMessages();
+      try {
+        await queryClient.invalidateQueries({ queryKey: PENDING_KEY });
+      } finally {
+        resolvingRef.current = false;
+        setBusyPending(null);
+      }
     }
   };
 
@@ -229,7 +240,8 @@ export default function Conversa() {
     toggleVoice().catch((err) => toast.error(`Falha no microfone: ${errorText(err)}`));
   };
 
-  const activity = turn ? <TurnActivity key={turn.runId} reasoning={turn.reasoning} tools={turn.tools} /> : null;
+  const placement = activityPlacement(turn, anchor);
+  const activity = turn && placement !== "none" ? <TurnActivity key={turn.runId} reasoning={turn.reasoning} tools={turn.tools} /> : null;
   const empty = !server.length && !unsynced.length && !messages.isPending && !messages.isError;
   const speaking = state.phase === "speaking";
 
@@ -276,7 +288,7 @@ export default function Conversa() {
           {empty ? <ConversationEmptyState className="min-h-48" /> : null}
           {server.map((message, i) => (
             <div key={message.id} className="contents">
-              {i === anchor ? activity : null}
+              {placement === "anchor" && i === anchor ? activity : null}
               <ChatMessage
                 message={message}
                 durationMs={i === anchor ? turn?.durationMs : null}
@@ -293,7 +305,7 @@ export default function Conversa() {
             .map((m) => (
               <ChatMessage key={m.key} message={{ ...m, channel: "ui" }} />
             ))}
-          {anchor < 0 ? activity : null}
+          {placement === "bottom" ? activity : null}
           {unsynced
             .filter((m) => m.role === "assistant")
             .map((m) => (

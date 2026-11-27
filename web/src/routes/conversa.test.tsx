@@ -129,6 +129,22 @@ test("confirmação pendente: Sim chama confirmPending e a resposta entra na con
   await waitFor(() => expect(screen.queryByText("Ação sensível · aguardando você")).not.toBeInTheDocument());
 });
 
+test("confirmação: clique duplo chama confirmPending uma vez e o cartão sai antes do refetch", async () => {
+  vi.mocked(api.getPending).mockResolvedValue([pendingAction]);
+  let release: (value: { text: string }) => void = () => {};
+  vi.mocked(api.confirmPending).mockReturnValue(new Promise((resolve) => (release = resolve)));
+  renderWithProviders(<Conversa />, "/conversa");
+  const sim = await screen.findByRole("button", { name: "Sim" });
+  // O servidor ainda devolveria a ação (refetch lento): o cartão não pode voltar a aceitar clique.
+  vi.mocked(api.getPending).mockReturnValue(new Promise(() => {}));
+  fireEvent.click(sim);
+  fireEvent.click(sim);
+  release({ text: "Guardado." });
+  expect(await screen.findByText("Guardado.")).toBeInTheDocument();
+  expect(screen.queryByText("Ação sensível · aguardando você")).not.toBeInTheDocument();
+  expect(api.confirmPending).toHaveBeenCalledTimes(1);
+});
+
 test("confirmação pendente: Não chama cancelPending", async () => {
   vi.mocked(api.getPending).mockResolvedValue([pendingAction]);
   renderWithProviders(<Conversa />, "/conversa");
@@ -177,4 +193,39 @@ test("linha de status: 'Pensando… · N caracteres de raciocínio' com raciocí
 test("linha de status avisa quando o SSE está reconectando", () => {
   renderWithProviders(<StatusLine state={initialState()} connected={false} />);
   expect(screen.getByRole("status")).toHaveTextContent("Pronto · reconectando…");
+});
+
+// ------------------------------------------------------------------ blocos do turno
+
+const runState = (channel: string, done = false) => {
+  let n = 0;
+  const e = (kind: string, name: string, status: string, detail: Record<string, unknown> = {}): AuditEvent => ({
+    id: ++n, kind, name, status, at: new Date(Date.now() - 5000 + n * 100).toISOString(), run_id: "r9", detail, duration_ms: null,
+  });
+  const events = [
+    e("turn", channel, "start"),
+    e("llm", "gemma", "start", { step: 0 }),
+    e("reasoning", "model", "progress", { step: 0, chars: 40, tail: "pensando" }),
+    e("tool", "notes_search", "start", { arguments: { q: "x" } }),
+    ...(done ? [e("turn", channel, "error", { detail: "falhou" })] : []),
+  ];
+  return events.reduce((s, ev) => applyEvent(s, ev, { phases: {} }), initialState());
+};
+
+test("turno da interface em curso mostra raciocínio e ferramentas no fim", async () => {
+  mocks.events.state = runState("ui");
+  renderWithProviders(<Conversa />, "/conversa");
+  expect(await screen.findByTestId("turn-activity")).toBeInTheDocument();
+  expect(screen.getByText("notes_search")).toBeInTheDocument();
+});
+
+test.each([
+  ["whatsapp", false],
+  ["ui", true],
+])("turno %s (encerrado: %s) sem resposta aqui não deixa blocos na conversa", async (channel, done) => {
+  mocks.events.state = runState(channel, done);
+  renderWithProviders(<Conversa />, "/conversa");
+  await screen.findByText(/Geral/);
+  expect(screen.queryByTestId("turn-activity")).not.toBeInTheDocument();
+  expect(screen.queryByText("notes_search")).not.toBeInTheDocument();
 });

@@ -24,6 +24,8 @@ export interface TurnReasoning {
 
 export interface TurnView {
   runId: string;
+  /** Canal do turno (`name` do turn/start): "ui", "whatsapp", "voice", "lembrete"… */
+  channel: string | null;
   startedAt: string | null;
   done: boolean;
   durationMs: number | null;
@@ -99,6 +101,7 @@ export function turnView(state: MonitorState, nowMs = Date.now()): TurnView | nu
   const tps = llmDone?.detail?.tokens_per_second;
   return {
     runId: state.runId,
+    channel: start?.name ?? null,
     startedAt: start?.at ?? null,
     done: Boolean(end),
     durationMs: end?.duration_ms ?? null,
@@ -123,6 +126,16 @@ export function turnAnchor(messages: { role: string; created_at: string }[], tur
     return Number.isFinite(at) && at + 1000 >= startMs ? i : -1;
   }
   return -1;
+}
+
+/**
+ * Onde mostrar os blocos do turno: acima da resposta dele (âncora) ou, enquanto um turno da própria
+ * interface ainda corre, no fim. Turno de outro canal ou já encerrado sem resposta aqui: em lugar nenhum.
+ */
+export function activityPlacement(turn: TurnView | null, anchor: number): "anchor" | "bottom" | "none" {
+  if (!turn) return "none";
+  if (anchor >= 0) return "anchor";
+  return turn.channel === "ui" && !turn.done ? "bottom" : "none";
 }
 
 export interface LocalMessage {
