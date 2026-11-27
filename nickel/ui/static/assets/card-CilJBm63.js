@@ -1,1 +1,0 @@
-import{Ft as e,Lt as t,Tt as n}from"./index-DlGiaQKj.js";t();var r=e();function i({className:e,...t}){return(0,r.jsx)(`div`,{"data-slot":`card`,className:n(`flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm`,e),...t})}export{i as t};

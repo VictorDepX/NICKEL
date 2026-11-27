@@ -431,6 +431,11 @@ export type PromptInputMessage = {
   files: FileUIPart[];
 };
 
+/** Impede o navegador de abrir arquivos soltos; arrastes de texto não são afetados. */
+const blockFileDrop = (event: React.DragEvent) => {
+  if (event.dataTransfer?.types?.includes("Files")) event.preventDefault();
+};
+
 export type PromptInputProps = Omit<
   HTMLAttributes<HTMLFormElement>,
   "onSubmit" | "onError"
@@ -734,6 +739,9 @@ export const PromptInput = ({
         className={cn("w-full", className)}
         onSubmit={handleSubmit}
         ref={formRef}
+        // Arquivo solto no campo faria o navegador abri-lo e sair do app; texto solto segue nativo.
+        onDragOver={blockFileDrop}
+        onDrop={blockFileDrop}
         {...props}
       >
         <InputGroup className="overflow-hidden rounded-[20px] border-border bg-card shadow-[var(--shadow-md)] dark:bg-card">{children}</InputGroup>

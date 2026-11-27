@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ErrorBoundary, RouteFallback } from "@/components/error-boundary";
 
@@ -29,4 +29,25 @@ test("markdown cujo chunk falha cai para o texto puro", async () => {
   render(<Fresh>texto **puro**</Fresh>);
   await waitFor(() => expect(screen.getByText("texto **puro**")).toBeInTheDocument());
   vi.doUnmock("./markdown");
+});
+
+test("falha numa rota lazy não contamina a próxima rota", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { MemoryRouter, Routes, Route, Link } = await import("react-router");
+  const { Lazy } = await import("@/App");
+  const Broken = lazy(() => Promise.reject(new Error("chunk")));
+  const Fine = lazy(() => Promise.resolve({ default: () => <p>conteúdo ok</p> }));
+  render(
+    <MemoryRouter initialEntries={["/a"]}>
+      <Link to="/b">ir</Link>
+      <Routes>
+        <Route path="/a" element={<Lazy><Broken /></Lazy>} />
+        <Route path="/b" element={<Lazy><Fine /></Lazy>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole("button", { name: "Recarregar" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "ir" }));
+  expect(await screen.findByText("conteúdo ok")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Recarregar" })).not.toBeInTheDocument();
 });
