@@ -78,6 +78,6 @@ def test_state_and_memory_endpoints(services):
 
 def test_ui_assets_are_revalidated(services):
     with TestClient(create_app(services=services, registry=build_registry(), background=False)) as client:
-        assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+        assert client.get("/static/esfera.gif").headers["cache-control"] == "no-cache"
         assert client.get("/").headers["cache-control"] == "no-cache"
         assert "cache-control" not in client.get("/health").headers

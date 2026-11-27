@@ -1,4 +1,4 @@
-"""Arquivos estáticos da UI: a aba Monitor é servida e referenciada sem CDN nem build."""
+"""UI estática: o build do React (web/) é servido em `/` e em `/static/*` com revalidação."""
 from __future__ import annotations
 
 import re
@@ -6,7 +6,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from nickel.app import STATIC_DIR, create_app
+from nickel.app import create_app
 from nickel.skills import build_registry
 
 
@@ -17,66 +17,26 @@ def client(services):
         yield test_client
 
 
-def test_static_monitor_assets_are_served_and_referenced(client):
-    for path in ("/static/monitor.js", "/static/monitor-core.js", "/static/monitor.css"):
-        response = client.get(path)
-        assert response.status_code == 200, path
-    assert "javascript" in client.get("/static/monitor.js").headers["content-type"]
+def test_index_is_the_react_build_and_assets_are_served(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    html = response.text
+    assert '<div id="root">' in html
+    script = re.search(r'<script type="module"[^>]* src="(/static/assets/[^"]+)"', html)
+    assert script, "script do bundle ausente"
+    asset = client.get(script.group(1))
+    assert asset.status_code == 200
+    assert asset.headers["cache-control"] == "no-cache"
+    assert "javascript" in asset.headers["content-type"]
 
+
+def test_index_references_only_local_assets(client):
     html = client.get("/").text
-    assert 'id="monitor"' in html
-    assert '<script type="module" src="/static/monitor.js"></script>' in html
-    assert 'href="/static/monitor.css"' in html
-    assert "/static/monitor-core.js" in client.get("/static/monitor.js").text
+    assert not re.search(r"(src|href)=\"https?://", html)
 
 
-def test_index_has_tabs_think_toggle_and_live_phase_label(client):
-    html = client.get("/").text
-    assert 'role="tablist"' in html
-    assert ">Conversa<" in html and ">Monitor<" in html
-    assert 'id="think"' in html and "Pensar antes de responder" in html
-    assert "Mostrar raciocínio" not in html
-    toggle = re.search(r'<label class="think-toggle" title="([^"]+)"', html)
-    assert toggle and "Monitor" in toggle.group(1)
-    assert re.search(r'id="phase-label"[^>]*aria-live="polite"', html)
-    assert 'id="reasoning-empty-text"' in html and 'id="reasoning-steps"' in html
-
-
-def test_monitor_never_injects_html_and_uses_no_cdn():
-    monitor = (STATIC_DIR / "monitor.js").read_text(encoding="utf-8")
-    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
-        assert forbidden not in monitor, forbidden
-    assert "Baixar relatório" in monitor
-    for text in (
-        "Sem raciocínio expandido (think desligado)",
-        "O modelo não raciocinou neste passo (think ligado)",
-        "Aguardando o modelo…",
-        "Nenhum turno ainda.",
-    ):
-        assert text in monitor, text
-    for name in ("index.html", "monitor.js", "monitor.css", "app.js"):
-        text = (STATIC_DIR / name).read_text(encoding="utf-8")
-        assert not re.search(r"(src|href)=\"https?://", text), name
-        assert "cdn" not in text.lower(), name
-
-
-def test_monitor_css_respects_reduced_motion():
-    css = (STATIC_DIR / "monitor.css").read_text(encoding="utf-8")
-    assert "prefers-reduced-motion" in css
-
-
-def test_app_sends_think_and_translates_voice_state():
-    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    # Sem toque do usuário vai `null` (o servidor decide); depois de mexer, vai a escolha guardada.
-    assert "think: thinkChoice()" in app_js
-    assert 'think: $("think").checked' not in app_js
-    choice = re.search(r"function thinkChoice\(\) \{(.*?)\n\}", app_js, re.S)
-    assert choice, "thinkChoice ausente"
-    body = choice.group(1)
-    assert 'storageGet("nickel.think")' in body or "storageGet(THINK_KEY)" in body
-    assert re.search(r'"1"\s*\?\s*true', body) and re.search(r'"0"\s*\?\s*false', body)
-    assert body.rstrip().rstrip(";").endswith(": null")
-    assert "think_default" in app_js  # sem escolha, a caixa mostra o padrão efetivo do servidor
-    assert "think: true" not in app_js
-    assert "localStorage" in app_js
-    assert "Transcrevendo" in (STATIC_DIR / "monitor-core.js").read_text(encoding="utf-8")  # estado da voz vai para o status do chat
+def test_sphere_gif_is_served(client):
+    response = client.get("/static/esfera.gif")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/gif"

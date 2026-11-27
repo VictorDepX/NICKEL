@@ -1,0 +1,148 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Tokens de docs/design/nickel.css. Só tema escuro. */
+:root {
+  color-scheme: dark;
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --card: #121317;
+  --card-foreground: #f4f4f5;
+  --popover: #0c0d10;
+  --popover-foreground: #f4f4f5;
+  --sidebar: #0c0d10;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-accent: #1a1b20;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: #1d1e23;
+  --sidebar-ring: #9cd6ff;
+  --sidebar-primary: #f4f4f5;
+  --sidebar-primary-foreground: #09090b;
+  --secondary: #1a1b20;
+  --secondary-foreground: #f4f4f5;
+  --muted: #18191d;
+  --muted-foreground: #a1a1aa;
+  --subtle-foreground: #8b8b94;
+  --border: #24262d;
+  --border-soft: #1d1e23;
+  --input: #2a2c33;
+  --primary: #f4f4f5;
+  --primary-foreground: #09090b;
+  --accent: #16202b;
+  --accent-foreground: #c9e9ff;
+  --ring: #9cd6ff;
+  --ice: #9cd6ff;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --warning-foreground: #fcd34d;
+  --destructive: #f87171;
+  --destructive-foreground: #fca5a5;
+  --phase-idle: #4ade80;
+  --phase-listening: #9cd6ff;
+  --phase-thinking: #b9a7f5;
+  --phase-tool: #e7b16b;
+  --phase-answering: #9cd6ff;
+  --phase-speaking: #fb923c;
+  --phase-error: #f87171;
+  --chart-1: #9cd6ff;
+  --chart-2: #fbbf24;
+  --chart-3: #4ade80;
+  --chart-4: #b9a7f5;
+  --chart-5: #e7b16b;
+  --radius: 12px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", Geist, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ice: var(--ice);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-phase-idle: var(--phase-idle);
+  --color-phase-listening: var(--phase-listening);
+  --color-phase-thinking: var(--phase-thinking);
+  --color-phase-tool: var(--phase-tool);
+  --color-phase-answering: var(--phase-answering);
+  --color-phase-speaking: var(--phase-speaking);
+  --color-phase-error: var(--phase-error);
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}

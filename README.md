@@ -113,7 +113,7 @@ nickel/
   integrations/  Google, Spotify, música, Obsidian
   channels/      WhatsApp e voz
   speech/        faster-whisper, Edge TTS, VoiceStudio, Piper, microfone
-  ui/static/     UI local
+  ui/static/     UI local (build do React em web/; não edite à mão)
 whatsapp-bridge/ open-wa v5 → HTTP local
 docs/Nickel/     persona e políticas (canônicas)
 docs/adr/        decisões de arquitetura
@@ -145,3 +145,13 @@ Os testes usam dublês para o LLM, o WhatsApp, o Spotify e o reconhecimento; nã
 ## Licença
 
 MIT.
+
+## GUI (React)
+
+O código da interface fica em `web/` (Vite + React + TypeScript + Tailwind v4 + shadcn/ui).
+O build é escrito em `nickel/ui/static/` e vai para o git:
+
+```
+cd web && npm ci && npm run build
+npm test
+```

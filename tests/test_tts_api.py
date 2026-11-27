@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import re
 import time
 
 from fastapi.testclient import TestClient
 
-from nickel.app import STATIC_DIR, create_app
+from nickel.app import create_app
 from nickel.core.events import CATALOG, PHASES
 from nickel.skills import build_registry
 from test_system_events import FakeSTT, _voice
@@ -195,18 +194,6 @@ def test_catalog_has_tts_and_phase_mapping():
     assert PHASES[("tts", "start")] == "speaking"
     assert PHASES[("tts", "done")] == "idle"
     assert PHASES[("tts", "error")] == "error"
-
-
-def test_ui_has_speak_toggle_listen_and_stop_buttons():
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    assert re.search(r'<header class="topbar">.*id="speak".*Falar respostas.*</header>', html, re.S)
-    assert re.search(r'id="stop-speech"[^>]*hidden', html)
-    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    for needle in ("/api/preferences", "/api/tts/speak", "/api/tts/stop", '"Ouvir"', "nickel:speech", "voice.tts", "Voz desligada"):
-        assert needle in app_js, needle
-    assert "localStorage.setItem(\"nickel.speak" not in app_js  # a preferência fica no servidor
-    monitor = (STATIC_DIR / "monitor.js").read_text(encoding="utf-8")
-    assert "nickel:speech" in monitor and "speechSignal(" in monitor
 
 
 def _statuses(services) -> list[str]:

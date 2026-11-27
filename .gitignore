@@ -9,3 +9,5 @@ whatsapp-bridge/node_modules/
 whatsapp-bridge/session/
 *.egg-info/
 .superpowers/
+web/node_modules/
+web/dist/
