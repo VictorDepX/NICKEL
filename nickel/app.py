@@ -20,6 +20,7 @@ from nickel.channels.whatsapp import WhatsAppChannel, prune_media
 from nickel.config import Settings, load_settings
 from nickel.core.agent import Agent, Turn
 from nickel.core.connectors import build_connectors
+from nickel.core.db import utcnow
 from nickel.core.events import CATALOG, PHASE_LABELS, PHASES
 from nickel.core.report import render_run_report
 from nickel.core.trace import new_run_id, run_scope
@@ -27,6 +28,7 @@ from nickel.core.skills import ToolRegistry
 from nickel.core.sysmon import MemorySampler
 from nickel.services import SPEECH_MAX_CHARS, Services, build_services
 from nickel.skills import build_registry
+from nickel.skills.reminders import REPEATS, format_local, parse_when_or_clock
 
 log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "ui" / "static"
@@ -320,6 +322,25 @@ def create_app(
     @app.get("/api/reminders")
     async def reminders() -> list[dict[str, Any]]:
         return services.reminders.upcoming(50)
+
+    @app.post("/api/reminders", status_code=201)
+    async def create_reminder(payload: dict[str, Any]) -> dict[str, Any]:
+        service = services.reminders
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(422, "Escreva o que lembrar.")
+        repeat = payload.get("repeat") or "none"
+        if repeat not in REPEATS:
+            raise HTTPException(422, "Repetição inválida: use nenhuma, diária, semanal ou mensal.")
+        try:
+            when = parse_when_or_clock(str(payload.get("when") or ""), service.tz)
+        except ValueError:
+            raise HTTPException(422, "Horário inválido: use HH:MM ou data e hora (2026-11-27T15:02).") from None
+        if when <= utcnow() and repeat == "none":
+            raise HTTPException(422, f"{format_local(when, service.tz)} já passou. Escolha um horário futuro.")
+        created = await service.create(text, when, repeat)
+        row = next((r for r in service.upcoming(500) if r["id"] == created["id"]), None)
+        return row or created
 
     @app.delete("/api/reminders/{reminder_id}")
     async def delete_reminder(reminder_id: int) -> dict[str, Any]:

@@ -121,7 +121,7 @@ export interface Reminder {
 
 export interface NewReminder {
   text: string;
-  /** Quando lembrar, em texto livre ou ISO (a rota é criada na Tarefa 7). */
+  /** ISO local ("2026-11-27T15:02") ou "HH:MM" (hoje se ainda for futuro, senão amanhã). */
   when: string;
 }
 

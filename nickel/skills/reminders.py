@@ -28,6 +28,20 @@ def parse_when(value: str, tz: ZoneInfo) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=tz)
 
 
+def parse_when_or_clock(value: str, tz: ZoneInfo, now: datetime | None = None) -> datetime:
+    """ISO 8601 (local sem fuso) ou "HH:MM" (hoje se ainda for futuro, senão amanhã)."""
+    text = (value or "").strip()
+    try:
+        hour, minute = (int(part) for part in text.split(":"))
+        if text.count(":") != 1 or not (0 <= hour < 24 and 0 <= minute < 60):
+            raise ValueError(text)
+    except ValueError:
+        return parse_when(text, tz)  # ISO (ou ValueError para o chamador)
+    local_now = (now or utcnow()).astimezone(tz)
+    due = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return due if due > local_now else due + timedelta(days=1)
+
+
 def add_months(dt: datetime, months: int) -> datetime:
     month_index = dt.month - 1 + months
     year, month = dt.year + month_index // 12, month_index % 12 + 1

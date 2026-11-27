@@ -165,3 +165,45 @@ def test_prune_media(tmp_path):
 
 def test_voice_toggle_unavailable_without_mic(client):
     assert client.post("/voice/toggle").json() == {"state": "unavailable"}
+
+
+def test_post_reminder_iso(client):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    when = (datetime.now(ZoneInfo("America/Sao_Paulo")) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+    response = client.post("/api/reminders", json={"text": " beber água ", "when": when})
+    assert response.status_code == 201
+    body = response.json()
+    assert body["text"] == "beber água" and body["status"] == "scheduled" and "due_local" in body
+    assert client.get("/api/reminders").json()[0]["id"] == body["id"]
+
+
+def test_post_reminder_clock_rolls_to_tomorrow(client, services):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("America/Sao_Paulo")
+    past = (datetime.now(tz) - timedelta(minutes=30)).strftime("%H:%M")
+    response = client.post("/api/reminders", json={"text": "alongar", "when": past})
+    assert response.status_code == 201
+    from nickel.core.db import parse_iso
+
+    due = parse_iso(response.json()["due_at"]).astimezone(tz)
+    assert due > datetime.now(tz) + timedelta(hours=23)
+    assert due.strftime("%H:%M") == past
+
+
+def test_post_reminder_rejects_empty_text(client):
+    response = client.post("/api/reminders", json={"text": "  ", "when": "23:59"})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Escreva o que lembrar."
+
+
+def test_post_reminder_rejects_bad_or_past_time(client):
+    bad = client.post("/api/reminders", json={"text": "x", "when": "amanhã cedo"})
+    assert bad.status_code == 422 and "Horário inválido" in bad.json()["detail"]
+    out_of_range = client.post("/api/reminders", json={"text": "x", "when": "25:61"})
+    assert out_of_range.status_code == 422
+    past = client.post("/api/reminders", json={"text": "x", "when": "2020-01-01T10:00"})
+    assert past.status_code == 422 and "já passou" in past.json()["detail"]
