@@ -1,22 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import { test } from "vitest";
 import {
-  initialState,
-  applyEvent,
-  groupByRun,
-  formatDuration,
-  hasReasoning,
-  filterTimeline,
-  runSummary,
-  runPhases,
-  elapsedMs,
-  reasoningSteps,
-  reasoningView,
-  timelineKey,
-  eventHint,
-  speechSignal,
-  fakeActionLabel,
-} from "../../nickel/ui/static/monitor-core.js";
+  initialState, applyEvent, groupByRun, formatDuration, hasReasoning, filterTimeline, runSummary,
+  runPhases, elapsedMs, reasoningSteps, reasoningView, timelineKey, eventHint, speechSignal,
+  fakeActionLabel, type AuditEvent,
+} from "./monitor-core";
 
 const catalog = {
   phases: {
@@ -31,7 +19,7 @@ const catalog = {
 };
 
 let nextId = 1;
-const ev = (kind, status, extra = {}) => ({
+const ev = (kind: string, status: string, extra: Partial<AuditEvent> = {}): AuditEvent => ({
   id: nextId++,
   at: "2026-11-19T10:00:00+00:00",
   kind,
@@ -128,12 +116,12 @@ test("groupByRun agrupa e conta erros", () => {
   ];
   const g = groupByRun(events);
   assert.deepEqual(g.map((x) => x.runId), [null, "b", "a"]);
-  const a = g.find((x) => x.runId === "a");
+  const a = g.find((x) => x.runId === "a")!;
   assert.equal(a.events.length, 3);
   assert.equal(a.errors, 1);
   assert.equal(a.durationMs, 500);
   assert.equal(a.startedAt, events[0].at);
-  const b = g.find((x) => x.runId === "b");
+  const b = g.find((x) => x.runId === "b")!;
   assert.equal(b.durationMs, 5000);
   assert.equal(b.errors, 0);
 });
@@ -242,7 +230,7 @@ test("runSummary junta informações básicas e técnicas do turno", () => {
 
 test("runPhases lista as fases percorridas com a duração de cada uma", () => {
   nextId = 1;
-  const at = (s) => `2026-11-19T10:00:0${s}+00:00`;
+  const at = (s: number) => `2026-11-19T10:00:0${s}+00:00`;
   const events = [
     ev("turn", "start", { at: at(0) }),
     ev("llm", "start", { at: at(1) }),
@@ -304,14 +292,14 @@ test("reasoningView: sem turno, aguardando, think desligado e com raciocínio", 
 
 test("reasoningView: think ligado sem raciocínio é skipped, desligado ou desconhecido é off", () => {
   nextId = 1;
-  const start = (think) => {
+  const start = (think?: boolean | null) => {
     let s = applyEvent(initialState(), ev("turn", "start"), catalog);
-    const detail = { step: 0 };
+    const detail: Record<string, unknown> = { step: 0 };
     if (think !== undefined) detail.think = think;
     s = applyEvent(s, ev("llm", "start", { detail }), catalog);
     return s;
   };
-  const done = (s) => applyEvent(s, ev("llm", "done", { detail: { step: 0 } }), catalog);
+  const done = (s: ReturnType<typeof initialState>) => applyEvent(s, ev("llm", "done", { detail: { step: 0 } }), catalog);
   assert.equal(start(true).think, true);
   assert.equal(reasoningView(start(true)), "waiting");
   assert.equal(reasoningView(done(start(true))), "skipped");
@@ -346,7 +334,7 @@ test("o último llm/start do turno define o think", () => {
 test("turn/start zera lastLlm", () => {
   nextId = 1;
   let s = applyEvent(initialState(), ev("llm", "done", { detail: { tokens_per_second: 40 } }), catalog);
-  assert.equal(s.lastLlm.tokensPerSecond, 40);
+  assert.equal(s.lastLlm?.tokensPerSecond, 40);
   s = applyEvent(s, ev("turn", "start"), catalog);
   assert.equal(s.lastLlm, null);
 });
@@ -369,7 +357,7 @@ test("timelineKey só muda quando o resultado filtrado muda", () => {
 test("linha do tempo guarda só o último progress de cada execução e passo", () => {
   nextId = 1;
   let s = applyEvent(initialState(), ev("turn", "start"), catalog);
-  const progress = (step, run_id = "r1") => ev("reasoning", "progress", { run_id, detail: { step, tail: `p${nextId}` } });
+  const progress = (step: number, run_id = "r1") => ev("reasoning", "progress", { run_id, detail: { step, tail: `p${nextId}` } });
   for (let i = 0; i < 5; i++) s = applyEvent(s, progress(0), catalog);
   s = applyEvent(s, progress(1), catalog);
   s = applyEvent(s, progress(1), catalog);

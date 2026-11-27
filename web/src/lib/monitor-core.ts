@@ -1,10 +1,125 @@
-// Núcleo puro do monitor: sem DOM e sem fetch. A UI (Task 9) consome estas funções.
+// Núcleo puro do monitor: sem DOM e sem fetch. A UI consome estas funções.
 
 export const TIMELINE_LIMIT = 500;
 
-const emptyReasoning = () => ({ tail: "", headline: "", chars: 0, tokens: 0, active: false });
+export type Detail = Record<string, any>;
 
-export function initialState() {
+export interface AuditEvent {
+  id: number;
+  at: string;
+  kind: string;
+  name: string;
+  status: string;
+  detail: Detail;
+  run_id: string | null;
+  duration_ms: number | null;
+}
+
+export interface Catalog {
+  kinds?: Record<string, { description: string; statuses: string[]; fields: string[]; source: string }>;
+  phases?: Record<string, string>;
+  labels?: Record<string, string>;
+}
+
+export interface Reasoning {
+  tail: string;
+  headline: string;
+  chars: number;
+  tokens: number;
+  active?: boolean;
+  final?: string;
+}
+
+export type ReasoningSteps = Record<string, Reasoning>;
+export type ReasoningStep = Reasoning & { step: number };
+
+export interface RunInfo {
+  startedAt: string;
+  lastAt?: string;
+  events: number;
+  errors: number;
+}
+
+export interface MonitorState {
+  phase: string;
+  since: string | null;
+  runId: string | null;
+  lastId: number;
+  reasoning: Reasoning;
+  reasoningSteps: ReasoningSteps;
+  llmDone: boolean;
+  lastLlm: { tokensPerSecond: number | null; completionTokens: number | null; promptTokens: number | null } | null;
+  think: boolean | null;
+  timeline: AuditEvent[];
+  runs: Record<string, RunInfo>;
+}
+
+export interface TimelineFilter {
+  kinds?: Set<string> | null;
+  onlyErrors?: boolean;
+}
+
+export interface RunGroup {
+  runId: string | null;
+  startedAt: string;
+  events: AuditEvent[];
+  errors: number;
+  durationMs: number;
+}
+
+export interface ToolCallSummary {
+  name: string;
+  ok: boolean;
+  summary: string | null;
+  durationMs: number | null;
+}
+
+export interface RunSummary {
+  status: "empty" | "running" | "done" | "error";
+  channel: string | null;
+  workspace: string | null;
+  command: string | null;
+  inputChars: number | null;
+  model: string | null;
+  backend: string | null;
+  requestedBackend: string | null;
+  llmCalls: number;
+  messages: number | null;
+  history: number | null;
+  tools: number | null;
+  systemChars: number | null;
+  estTokens: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  tokensPerSecond: number | null;
+  toolCalls: ToolCallSummary[];
+  errors: number;
+  steps: number | null;
+  durationMs: number | null;
+  replyChars: number | null;
+  error: string | null;
+  fakeAction: string | null;
+}
+
+export interface RunPhase {
+  phase: string;
+  at: string;
+  ms: number | null;
+}
+
+export type ReasoningViewName = "empty" | "reasoning" | "skipped" | "off" | "none" | "waiting";
+
+export interface ChatStatus {
+  active: boolean;
+  phase: string;
+  text: string;
+  detail: string;
+  elapsedMs: number | null;
+}
+
+const emptyReasoning = (): Reasoning => ({ tail: "", headline: "", chars: 0, tokens: 0, active: false });
+
+export function initialState(): MonitorState {
   return {
     phase: "idle",
     since: null,
@@ -20,11 +135,11 @@ export function initialState() {
   };
 }
 
-const blank = (text) => !text || !String(text).trim();
+const blank = (text: unknown) => !text || !String(text).trim();
 
 // Raciocínio por passo: um passo só com espaços (ex.: "<think>\n" de template) nunca
 // substitui nem apaga o raciocínio útil de outro passo.
-function updateStep(steps, key, detail) {
+function updateStep(steps: ReasoningSteps, key: string, detail: Detail): ReasoningSteps {
   const step = String(detail.step ?? 0);
   const prev = steps[step];
   if (key === "reasoning/progress") {
@@ -41,7 +156,7 @@ function updateStep(steps, key, detail) {
     };
   }
   if (blank(detail.text)) return prev ? { ...steps, [step]: { ...prev, active: false } } : steps;
-  const base = prev || { tail: "", headline: "", chars: 0, tokens: 0 };
+  const base: Reasoning = prev || { tail: "", headline: "", chars: 0, tokens: 0 };
   return {
     ...steps,
     [step]: {
@@ -55,14 +170,14 @@ function updateStep(steps, key, detail) {
   };
 }
 
-function latestReasoning(steps) {
+function latestReasoning(steps: ReasoningSteps): Reasoning {
   const list = stepList(steps);
   if (!list.length) return emptyReasoning();
-  const { step, ...reasoning } = list[list.length - 1];
+  const { step: _step, ...reasoning } = list[list.length - 1];
   return reasoning;
 }
 
-function stepList(steps) {
+function stepList(steps: ReasoningSteps | undefined): ReasoningStep[] {
   return Object.entries(steps || {})
     .map(([step, r]) => ({ step: Number(step), ...r }))
     .filter(hasReasoning)
@@ -70,12 +185,12 @@ function stepList(steps) {
 }
 
 // Passos do turno atual que têm raciocínio, em ordem.
-export function reasoningSteps(state) {
+export function reasoningSteps(state: MonitorState): ReasoningStep[] {
   return stepList(state.reasoningSteps);
 }
 
 // O que o painel de raciocínio deve dizer quando não há texto para mostrar.
-export function reasoningView(state) {
+export function reasoningView(state: MonitorState): ReasoningViewName {
   if (!state.runId) return "empty";
   if (hasReasoning(state.reasoning)) return "reasoning";
   // think ligado e nenhum raciocínio: o modelo pulou (ex.: foi direto à tool). Desconhecido conta como desligado.
@@ -85,7 +200,7 @@ export function reasoningView(state) {
 }
 
 // Chave da linha do tempo filtrada: muda só se aparece um evento visível ou um grupo novo.
-export function timelineKey(timeline, filter, version) {
+export function timelineKey(timeline: AuditEvent[], filter: TimelineFilter | undefined, version: number): string {
   const visible = filterTimeline(timeline, filter || {});
   const last = visible.length ? visible[visible.length - 1].id : 0;
   const runs = new Set(visible.map((e) => e.run_id ?? null)).size;
@@ -93,16 +208,16 @@ export function timelineKey(timeline, filter, version) {
 }
 
 // Mantém só as execuções que ainda aparecem na linha do tempo (aba aberta por dias).
-function pruneRuns(runs, timeline) {
+function pruneRuns(runs: Record<string, RunInfo>, timeline: AuditEvent[]): Record<string, RunInfo> {
   const alive = new Set(timeline.map((e) => e.run_id).filter(Boolean));
-  const out = {};
+  const out: Record<string, RunInfo> = {};
   for (const [id, info] of Object.entries(runs)) if (alive.has(id)) out[id] = info;
   return out;
 }
 
-function trackRun(runs, event, replaced) {
+function trackRun(runs: Record<string, RunInfo>, event: AuditEvent, replaced: boolean): Record<string, RunInfo> {
   if (!event.run_id) return runs;
-  const prev = runs[event.run_id] || { startedAt: event.at, events: 0, errors: 0 };
+  const prev: RunInfo = runs[event.run_id] || { startedAt: event.at, events: 0, errors: 0 };
   return {
     ...runs,
     [event.run_id]: {
@@ -114,12 +229,12 @@ function trackRun(runs, event, replaced) {
   };
 }
 
-const isProgress = (e) => e.kind === "reasoning" && e.status === "progress";
-const stepOf = (e) => String((e.detail || {}).step ?? 0);
+const isProgress = (e: AuditEvent) => e.kind === "reasoning" && e.status === "progress";
+const stepOf = (e: AuditEvent) => String((e.detail || {}).step ?? 0);
 
 // Um `reasoning/progress` novo substitui o anterior do mesmo run e passo: o parcial chega
 // até 2,5 vezes por segundo e, sem isto, empurraria `turn/start` para fora da linha do tempo.
-function withoutOlderProgress(timeline, event) {
+function withoutOlderProgress(timeline: AuditEvent[], event: AuditEvent): AuditEvent[] {
   if (!isProgress(event)) return timeline;
   const run = event.run_id ?? null;
   const step = stepOf(event);
@@ -129,7 +244,7 @@ function withoutOlderProgress(timeline, event) {
 // Sinal de fala para a GUI: "start" mostra "Parar"; "end" (tts/done ou tts/error) esconde.
 // Independe da fase: um tts/error sem tts/start (voz desligada) não muda a fase, mas encerra a fala.
 // tts/skipped (nota de voz do WhatsApp pulada porque já havia fala) não é fim de fala: devolve null.
-export function speechSignal(event) {
+export function speechSignal(event: AuditEvent | null | undefined): "start" | "end" | null {
   if (!event || event.kind !== "tts") return null;
   if (event.status === "start") return "start";
   if (event.status === "done" || event.status === "error") return "end";
@@ -141,14 +256,14 @@ export function speechSignal(event) {
 // quando ela ainda é "speaking". Fora disso o evento vai só para a linha do tempo.
 const TTS_START_FROM = new Set(["idle", "error", "speaking"]);
 
-function ttsMayChangePhase(event, current) {
+function ttsMayChangePhase(event: AuditEvent, current: string): boolean {
   if (event.kind !== "tts") return true;
   if (event.status === "start") return TTS_START_FROM.has(current);
   if (event.status === "done" || event.status === "error") return current === "speaking";
   return true;
 }
 
-export function applyEvent(state, event, catalog) {
+export function applyEvent(state: MonitorState, event: AuditEvent, catalog?: Catalog | null): MonitorState {
   if (!event || typeof event.id !== "number" || event.id <= state.lastId) return state;
 
   const detail = event.detail || {};
@@ -156,7 +271,7 @@ export function applyEvent(state, event, catalog) {
   const timeline = [...base, event].slice(-TIMELINE_LIMIT);
   let runs = trackRun(state.runs, event, base.length < state.timeline.length);
   if (state.timeline.length >= TIMELINE_LIMIT) runs = pruneRuns(runs, timeline);
-  const next = { ...state, lastId: event.id, timeline, runs };
+  const next: MonitorState = { ...state, lastId: event.id, timeline, runs };
 
   const phase = ((catalog && catalog.phases) || {})[`${event.kind}/${event.status}`];
   if (phase && phase !== state.phase && ttsMayChangePhase(event, state.phase)) {
@@ -188,22 +303,22 @@ export function applyEvent(state, event, catalog) {
   return next;
 }
 
-export function groupByRun(events) {
-  const groups = new Map();
+export function groupByRun(events: AuditEvent[]): RunGroup[] {
+  const groups = new Map<string | null, { runId: string | null; startedAt: string; events: AuditEvent[]; firstId: number }>();
   for (const e of events) {
     const id = e.run_id ?? null;
     if (!groups.has(id)) groups.set(id, { runId: id, startedAt: e.at, events: [], firstId: e.id });
-    const g = groups.get(id);
+    const g = groups.get(id)!;
     g.events.push(e);
     if (e.id < g.firstId) { g.firstId = e.id; g.startedAt = e.at; }
   }
-  const out = [];
+  const out: (RunGroup & { firstId: number })[] = [];
   for (const g of groups.values()) {
     const closing = g.events.find(
       (e) => e.kind === "turn" && (e.status === "done" || e.status === "error") && e.duration_ms != null,
     );
     const durationMs = closing
-      ? closing.duration_ms
+      ? (closing.duration_ms as number) // o filtro acima garante que não é nulo
       : g.events.reduce((sum, e) => sum + (e.duration_ms || 0), 0);
     out.push({
       runId: g.runId,
@@ -215,10 +330,10 @@ export function groupByRun(events) {
     });
   }
   out.sort((a, b) => b.firstId - a.firstId);
-  return out.map(({ firstId, ...rest }) => rest);
+  return out.map(({ firstId: _firstId, ...rest }) => rest);
 }
 
-export function formatDuration(ms) {
+export function formatDuration(ms: unknown): string {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
   if (Math.round(ms) < 1000) return `${Math.round(ms)} ms`;
   const tenths = Math.round(ms / 100);
@@ -230,20 +345,20 @@ export function formatDuration(ms) {
 }
 
 // `final === ""` (ou ausente após um passo sem raciocínio) conta como "sem raciocínio".
-export function hasReasoning(reasoning) {
+export function hasReasoning(reasoning: Reasoning | null | undefined): boolean {
   if (!reasoning) return false;
   if (reasoning.final !== undefined) return reasoning.final !== "";
   return Boolean(reasoning.active || reasoning.tail);
 }
 
-export function filterTimeline(events, { kinds = null, onlyErrors = false } = {}) {
+export function filterTimeline(events: AuditEvent[], { kinds = null, onlyErrors = false }: TimelineFilter = {}): AuditEvent[] {
   return events.filter((e) => (!kinds || kinds.has(e.kind)) && (!onlyErrors || e.status === "error"));
 }
 
-const byId = (events) => events.slice().sort((a, b) => a.id - b.id);
+const byId = (events: AuditEvent[]) => events.slice().sort((a, b) => a.id - b.id);
 
-export function runSummary(events) {
-  const s = {
+export function runSummary(events: AuditEvent[]): RunSummary {
+  const s: RunSummary = {
     status: events.length ? "running" : "empty",
     channel: null, workspace: null, command: null, inputChars: null,
     model: null, backend: null, requestedBackend: null, llmCalls: 0,
@@ -310,9 +425,9 @@ export function runSummary(events) {
 }
 
 // Fases percorridas (sem repetições seguidas), com a duração de cada uma; a última fica em aberto.
-export function runPhases(events, catalog) {
+export function runPhases(events: AuditEvent[], catalog?: Catalog | null): RunPhase[] {
   const phases = (catalog && catalog.phases) || {};
-  const out = [];
+  const out: RunPhase[] = [];
   for (const e of byId(events)) {
     const phase = phases[`${e.kind}/${e.status}`];
     if (!phase || (out.length && out[out.length - 1].phase === phase)) continue;
@@ -328,13 +443,13 @@ export function runPhases(events, catalog) {
 export const FAKE_TOOL = "<fake>";
 const FAKE_RETRY_MARK = "pedindo nova tentativa";
 
-function isFakeRetry(e) {
+function isFakeRetry(e: AuditEvent): boolean {
   const detail = (e.detail || {}).detail;
   return e.name === FAKE_TOOL && typeof detail === "string" && detail.includes(FAKE_RETRY_MARK);
 }
 
 // Texto do aviso no resumo: distingue a nova tentativa pedida da afirmação que persistiu.
-export function fakeActionLabel(summary) {
+export function fakeActionLabel(summary: RunSummary | null | undefined): string | null {
   const detail = summary && summary.fakeAction;
   if (!detail) return null;
   if (String(detail).includes(FAKE_RETRY_MARK)) {
@@ -343,13 +458,13 @@ export function fakeActionLabel(summary) {
   return `ação inventada pelo modelo: ${detail}`;
 }
 
-export function num(value, digits = 0) {
+export function num(value: unknown, digits = 0): string {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   return Number(value).toLocaleString("pt-BR", { maximumFractionDigits: digits });
 }
 
 // Resumo de uma linha de um evento, para a linha do tempo.
-export function eventHint(e) {
+export function eventHint(e: AuditEvent): string {
   const d = e.detail || {};
   switch (`${e.kind}/${e.status}`) {
     case "turn/start": return [d.channel && `canal ${d.channel}`, d.workspace, d.chars != null && `${d.chars} caracteres`].filter(Boolean).join(" · ");
@@ -375,7 +490,7 @@ export function eventHint(e) {
   }
 }
 
-export function elapsedMs(since, nowMs) {
+export function elapsedMs(since: string | null | undefined, nowMs: number): number | null {
   if (!since) return null;
   const start = Date.parse(since);
   if (!Number.isFinite(start)) return null;
@@ -384,7 +499,7 @@ export function elapsedMs(since, nowMs) {
 
 // Linha de status do chat ("o que o modelo está fazendo"), a partir do mesmo estado do Monitor.
 // `active` = há trabalho em curso; `elapsedMs` conta desde o início do turno (ou da fala).
-const ACTIVE_TEXT = {
+const ACTIVE_TEXT: Record<string, string> = {
   routing: "Preparando o pedido",
   prompting: "Preparando o pedido",
   answering: "Escrevendo a resposta",
@@ -394,10 +509,10 @@ const ACTIVE_TEXT = {
   speaking: "Falando a resposta",
 };
 
-export function chatStatus(state, nowMs) {
+export function chatStatus(state: MonitorState, nowMs: number): ChatStatus {
   const events = state.runId ? byId(state.timeline.filter((e) => e.run_id === state.runId)) : [];
   const turnStart = events.find((e) => e.kind === "turn" && e.status === "start");
-  const last = (kind, status) => [...events].reverse().find((e) => e.kind === kind && (!status || e.status === status));
+  const last = (kind: string, status?: string) => [...events].reverse().find((e) => e.kind === kind && (!status || e.status === status));
   const phase = state.phase || "idle";
   const since = phase === "speaking" || phase === "listening" || phase === "transcribing" || !turnStart ? state.since : turnStart.at;
   const elapsed = elapsedMs(since, nowMs);

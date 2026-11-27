@@ -1,6 +1,6 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { initialState, applyEvent, chatStatus } from "../../nickel/ui/static/monitor-core.js";
+import { test } from "vitest";
+import { initialState, applyEvent, chatStatus, type AuditEvent } from "./monitor-core";
 
 const catalog = {
   phases: {
@@ -11,11 +11,13 @@ const catalog = {
   },
 };
 const T0 = Date.parse("2026-11-26T15:00:00Z");
-const at = (s) => new Date(T0 + s * 1000).toISOString();
+const at = (s: number) => new Date(T0 + s * 1000).toISOString();
 let id = 0;
-const ev = (kind, name, status, s, detail = {}, extra = {}) => ({ id: ++id, kind, name, status, at: at(s), run_id: "r1", detail, ...extra });
+const ev = (kind: string, name: string, status: string, s: number, detail: Record<string, unknown> = {}, extra: Partial<AuditEvent> = {}): AuditEvent => ({
+  id: ++id, kind, name, status, at: at(s), run_id: "r1", detail, duration_ms: null, ...extra,
+});
 
-function feed(events) {
+function feed(events: AuditEvent[]) {
   return events.reduce((state, e) => applyEvent(state, e, catalog), initialState());
 }
 
