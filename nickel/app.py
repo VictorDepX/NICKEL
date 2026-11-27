@@ -325,6 +325,8 @@ def create_app(
 
     @app.post("/api/reminders", status_code=201)
     async def create_reminder(request: Request) -> dict[str, Any]:
+        if not request.headers.get("content-type", "").lower().startswith("application/json"):
+            raise HTTPException(422, "Envie o corpo como application/json.")
         try:
             payload = await request.json()
         except ValueError:

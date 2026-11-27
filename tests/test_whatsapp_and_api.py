@@ -217,7 +217,17 @@ def test_post_reminder_rejects_invalid_repeat(client):
 
 
 def test_post_reminder_rejects_non_object_body(client):
-    for body in ([], "texto", 5, None):
-        response = client.post("/api/reminders", json=body)
+    for body in ("[]", '"texto"', "5", "null", "{quebrado"):
+        response = client.post("/api/reminders", content=body, headers={"content-type": "application/json"})
         assert response.status_code == 422
         assert response.json()["detail"] == "Envie um objeto JSON com text, when e repeat."
+
+
+def test_post_reminder_rejects_non_json_content_type(client):
+    response = client.post(
+        "/api/reminders",
+        content='{"text": "x", "when": "23:59"}',
+        headers={"content-type": "text/plain"},
+    )
+    assert response.status_code == 422
+    assert "application/json" in response.json()["detail"]

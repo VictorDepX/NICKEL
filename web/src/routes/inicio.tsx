@@ -269,7 +269,7 @@ export default function Inicio() {
 
           <form
             onSubmit={submit}
-            className="flex w-full max-w-[660px] items-center gap-2 rounded-full border border-border bg-card py-[7px] pr-[7px] pl-5 shadow-md"
+            className="flex w-full max-w-[660px] items-center gap-2 rounded-full border border-border bg-card py-[7px] pr-[7px] pl-5 shadow-md focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/40"
           >
             <label htmlFor="inicio-prompt" className="sr-only">
               Mensagem para o NICKEL
