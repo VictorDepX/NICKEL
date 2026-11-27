@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-const PHASE_COLORS: Record<string, string> = {
+export const PHASE_COLORS: Record<string, string> = {
   idle: "var(--phase-idle)",
   listening: "var(--phase-listening)",
   transcribing: "var(--phase-listening)",
