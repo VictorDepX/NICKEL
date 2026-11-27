@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResourceButton, ResourceCapsule } from "@/components/resource-capsule";
+import { useAppStateSync } from "@/hooks/use-app-state";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const STORAGE_KEY = "nickel.sidebar.open";
@@ -36,6 +37,7 @@ export function AppShell() {
   const [open, setOpen] = useState(readOpen);
   const { pathname } = useLocation();
   const isMobile = useIsMobile();
+  useAppStateSync();
   const withCapsule = CAPSULE_ROUTES.has(pathname);
 
   return (

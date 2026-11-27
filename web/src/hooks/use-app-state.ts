@@ -13,8 +13,8 @@ export function invalidatesAppState(event: AuditEvent): boolean {
   return event.kind === "confirmation" || event.kind === "reminder";
 }
 
-/** Estado do NICKEL (/api/state): atualiza a cada 10 s e quando um turno acaba, uma confirmação ou um lembrete muda. */
-export function useAppState() {
+/** Invalida /api/state quando um turno acaba, uma confirmação ou um lembrete muda. Monte uma vez só (AppShell). */
+export function useAppStateSync() {
   const queryClient = useQueryClient();
   const { state } = useEvents();
   const seen = useRef<number | null>(null);
@@ -27,6 +27,9 @@ export function useAppState() {
       void queryClient.invalidateQueries({ queryKey: APP_STATE_KEY });
     }
   }, [state.lastId, state.timeline, queryClient]);
+}
 
+/** Estado do NICKEL (/api/state): atualiza a cada 10 s (e, via useAppStateSync, quando algo relevante acontece). */
+export function useAppState() {
   return useQuery({ queryKey: APP_STATE_KEY, queryFn: getState, refetchInterval: APP_STATE_REFETCH_MS });
 }

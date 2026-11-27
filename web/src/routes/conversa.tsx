@@ -29,10 +29,9 @@ import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { APP_STATE_KEY, useAppState } from "@/hooks/use-app-state";
 import { useEvents } from "@/hooks/use-events";
+import { useResolvePending } from "@/hooks/use-resolve-pending";
 import { PENDING_KEY, usePending, useWorkspaces } from "@/hooks/use-shell-data";
 import {
-  cancelPending,
-  confirmPending,
   getMessages,
   getPreferences,
   sendChat,
@@ -40,7 +39,6 @@ import {
   toggleVoice,
   ttsSpeak,
   ttsStop,
-  type PendingAction,
 } from "@/lib/api";
 import { activityPlacement, lastServerId, pendingLocals, turnAnchor, turnView, type LocalMessage } from "@/lib/chat-turn";
 import { chatStatus, type AuditEvent } from "@/lib/monitor-core";
@@ -95,7 +93,7 @@ export default function Conversa() {
   const workspaceId = appState?.workspace ?? workspaces?.active ?? "";
   const messages = useQuery({
     queryKey: [...MESSAGES_KEY, workspaceId],
-    queryFn: () => getMessages(120),
+    queryFn: () => getMessages(120, workspaceId || undefined),
     placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
@@ -105,7 +103,6 @@ export default function Conversa() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<{ title: string; message: string } | null>(null);
   const [locals, setLocals] = useState<LocalMessage[]>([]);
-  const [busyPending, setBusyPending] = useState<string | null>(null);
   const [thinkChoice, setThinkChoice] = useState<boolean | null>(readThink);
 
   const think = thinkChoice ?? appState?.think_default ?? false;
@@ -191,30 +188,16 @@ export default function Conversa() {
     // handleSubmit muda a cada render; o ref garante o envio único.
   }, [draft, preferences.isPending]);
 
-  // Ref (e não só estado): um clique duplo chega antes de o React desabilitar os botões.
-  const resolvingRef = useRef(false);
+  const { resolve, busyId: busyPending } = useResolvePending();
   const resolvePending = async (id: string, decision: "confirm" | "cancel") => {
-    if (resolvingRef.current) return;
-    resolvingRef.current = true;
-    setBusyPending(id);
     setError(null);
-    try {
-      const reply = await (decision === "confirm" ? confirmPending(id) : cancelPending(id));
-      // Sai do cartão já: a ação foi resolvida, mesmo antes de /api/pending responder de novo.
-      queryClient.setQueryData<PendingAction[]>(PENDING_KEY, (items) => items?.filter((a) => a.id !== id));
-      if (reply.text?.trim()) addLocal("assistant", reply.text);
-    } catch (err) {
-      setError({ title: decision === "confirm" ? "Falha ao confirmar" : "Falha ao cancelar", message: errorText(err) });
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: APP_STATE_KEY });
-      void syncMessages();
-      try {
-        await queryClient.invalidateQueries({ queryKey: PENDING_KEY });
-      } finally {
-        resolvingRef.current = false;
-        setBusyPending(null);
+    await resolve(id, decision, (result) => {
+      if (result.ok) {
+        if (result.text.trim()) addLocal("assistant", result.text);
+      } else {
+        setError({ title: decision === "confirm" ? "Falha ao confirmar" : "Falha ao cancelar", message: errorText(result.error) });
       }
-    }
+    });
   };
 
   const listen = (value: string) => {

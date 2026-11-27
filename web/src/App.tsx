@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { HashRouter, Route, Routes } from "react-router";
+import { ErrorBoundary, RouteFallback } from "@/components/error-boundary";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import Inicio from "@/routes/inicio";
@@ -13,7 +14,11 @@ const Conectores = lazy(() => import("@/routes/conectores"));
 
 /** Enquanto a rota carrega: só o fundo, sem texto nem salto de layout. */
 function Lazy({ children }: { children: ReactNode }) {
-  return <Suspense fallback={<div aria-busy="true" className="min-h-svh bg-background" />}>{children}</Suspense>;
+  return (
+    <ErrorBoundary fallback={<RouteFallback />}>
+      <Suspense fallback={<div aria-busy="true" className="min-h-svh bg-background" />}>{children}</Suspense>
+    </ErrorBoundary>
+  );
 }
 
 export default function App() {

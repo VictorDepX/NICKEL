@@ -96,8 +96,32 @@ test("clicar na esfera abre a Conversa e liga o microfone", async () => {
   expect(api.toggleVoice).toHaveBeenCalledTimes(1);
 });
 
+test("cartão pendente: ações que não são memory_save usam Sim/Não e mostram a ferramenta", async () => {
+  vi.mocked(api.getPending).mockResolvedValue([{ ...pendingAction, tool: "gmail_send" }]);
+  renderInicio();
+  expect(await screen.findByRole("button", { name: "Sim" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Não" })).toBeInTheDocument();
+  expect(screen.getByText("gmail_send")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Recusar" })).not.toBeInTheDocument();
+});
+
+test("a esfera não promete atalho de teclado", async () => {
+  renderInicio();
+  await screen.findByText(/Pronto/);
+  expect(screen.queryByText(/Espaço/)).not.toBeInTheDocument();
+});
+
+test("cartão pendente: memory_save usa Guardar/Recusar; Recusar chama cancelPending", async () => {
+  vi.mocked(api.getPending).mockResolvedValueOnce([{ ...pendingAction, tool: "memory_save" }]).mockResolvedValue([]);
+  renderInicio();
+  expect(await screen.findByRole("button", { name: "Guardar" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
+  await waitFor(() => expect(api.cancelPending).toHaveBeenCalledWith("p1"));
+});
+
 test("cartão pendente: clique duplo em Guardar chama confirmPending uma vez", async () => {
-  vi.mocked(api.getPending).mockResolvedValueOnce([pendingAction]).mockResolvedValue([]);
+  vi.mocked(api.getPending).mockResolvedValueOnce([{ ...pendingAction, tool: "memory_save" }]).mockResolvedValue([]);
   renderInicio();
   const guardar = await screen.findByRole("button", { name: "Guardar" });
   fireEvent.click(guardar);
@@ -130,6 +154,11 @@ test("continuar conversa mostra a última mensagem do usuário", async () => {
   renderInicio();
   expect(await screen.findByText("última pergunta")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Abrir · 10:05/ })).toHaveAttribute("href", "/conversa");
+});
+
+test("o histórico é pedido para o workspace ativo", async () => {
+  renderInicio();
+  await waitFor(() => expect(api.getMessages).toHaveBeenCalledWith(120, "geral"));
 });
 
 test("o relógio avança sozinho", () => {

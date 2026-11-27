@@ -51,7 +51,6 @@ import {
   type ChangeEvent,
   type ChangeEventHandler,
   Children,
-  type ClipboardEventHandler,
   type ComponentProps,
   createContext,
   type FormEvent,
@@ -438,8 +437,6 @@ export type PromptInputProps = Omit<
 > & {
   accept?: string; // e.g., "image/*" or leave undefined for any
   multiple?: boolean;
-  // When true, accepts drops anywhere on document. Default false (opt-in).
-  globalDrop?: boolean;
   // Render a hidden input with given name and keep it in sync for native form posts. Default false.
   syncHiddenInput?: boolean;
   // Minimal constraints
@@ -459,7 +456,6 @@ export const PromptInput = ({
   className,
   accept,
   multiple,
-  globalDrop,
   syncHiddenInput,
   maxFiles,
   maxFileSize,
@@ -607,56 +603,7 @@ export const PromptInput = ({
     }
   }, [files, syncHiddenInput]);
 
-  // Attach drop handlers on nearest form and document (opt-in)
-  useEffect(() => {
-    const form = formRef.current;
-    if (!form) return;
-    if (globalDrop) return // when global drop is on, let the document-level handler own drops
-
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-    };
-    const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-        add(e.dataTransfer.files);
-      }
-    };
-    form.addEventListener("dragover", onDragOver);
-    form.addEventListener("drop", onDrop);
-    return () => {
-      form.removeEventListener("dragover", onDragOver);
-      form.removeEventListener("drop", onDrop);
-    };
-  }, [add, globalDrop]);
-
-  useEffect(() => {
-    if (!globalDrop) return;
-
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-    };
-    const onDrop = (e: DragEvent) => {
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-      }
-      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-        add(e.dataTransfer.files);
-      }
-    };
-    document.addEventListener("dragover", onDragOver);
-    document.addEventListener("drop", onDrop);
-    return () => {
-      document.removeEventListener("dragover", onDragOver);
-      document.removeEventListener("drop", onDrop);
-    };
-  }, [add, globalDrop]);
+  // NICKEL não envia arquivos: sem interceptar colar nem soltar (o texto colado segue o fluxo normal).
 
   useEffect(
     () => () => {
@@ -862,30 +809,6 @@ export const PromptInputTextarea = ({
     }
   };
 
-  const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
-    const items = event.clipboardData?.items;
-
-    if (!items) {
-      return;
-    }
-
-    const files: File[] = [];
-
-    for (const item of items) {
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (file) {
-          files.push(file);
-        }
-      }
-    }
-
-    if (files.length > 0) {
-      event.preventDefault();
-      attachments.add(files);
-    }
-  };
-
   const controlledProps = controller
     ? {
         value: controller.textInput.value,
@@ -905,7 +828,6 @@ export const PromptInputTextarea = ({
       onCompositionEnd={() => setIsComposing(false)}
       onCompositionStart={() => setIsComposing(true)}
       onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
       placeholder={placeholder}
       {...props}
       {...controlledProps}

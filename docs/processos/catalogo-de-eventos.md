@@ -36,6 +36,7 @@ O monitor deduz a fase atual a partir do último evento que muda de fase.
 | `reasoning` | `answering` | Respondendo (`answering`) |
 | `reasoning` | `progress` | Pensando (`thinking`) |
 | `route` | `resolved` | Montando prompt (`prompting`) |
+| `system` | `startup` | Ocioso (`idle`) |
 | `tool` | `error` | Pensando (`thinking`) |
 | `tool` | `ok` | Pensando (`thinking`) |
 | `tool` | `start` | Executando ferramenta (`tool`) |

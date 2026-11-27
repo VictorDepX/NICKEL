@@ -1,5 +1,6 @@
 "use client";
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
 import {
   ButtonGroup,
@@ -309,13 +310,19 @@ export type MessageResponseProps = MarkdownProps;
 // Streamdown (markdown + shiki) é pesado: carrega sob demanda, com o texto puro enquanto isso.
 const LazyMarkdown = lazy(() => import("./markdown"));
 
+const plain = (className: string | undefined, children: string) => (
+  <div className={cn("size-full break-words whitespace-pre-wrap", className)}>{children}</div>
+);
+
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => (
-    <Suspense fallback={<div className={cn("size-full break-words whitespace-pre-wrap", className)}>{children}</div>}>
-      <LazyMarkdown className={className} {...props}>
-        {children}
-      </LazyMarkdown>
-    </Suspense>
+    <ErrorBoundary fallback={plain(className, children)}>
+      <Suspense fallback={plain(className, children)}>
+        <LazyMarkdown className={className} {...props}>
+          {children}
+        </LazyMarkdown>
+      </Suspense>
+    </ErrorBoundary>
   ),
   (prevProps, nextProps) => prevProps.children === nextProps.children
 );

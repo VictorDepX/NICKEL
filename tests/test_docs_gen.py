@@ -94,3 +94,8 @@ def test_cli_audit_export_since_and_md(data_dir, capsys):
 def test_cli_audit_docs_writes_files(tmp_path, capsys):
     assert main(["audit", "docs", "--out", str(tmp_path / "x")]) == 0
     assert (tmp_path / "x" / CATALOG_FILE).read_text(encoding="utf-8") == render_catalog_md()
+
+
+def test_system_startup_resets_phase_to_idle():
+    # Reinício no meio de um turno não pode deixar a UI presa em "Pensando".
+    assert PHASES[("system", "startup")] == "idle"

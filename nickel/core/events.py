@@ -77,6 +77,8 @@ PHASES: dict[tuple[str, str], str] = {
     ("tts", "start"): "speaking",
     ("tts", "done"): "idle",
     ("tts", "error"): "error",
+    # Reinício do servidor no meio de um turno: nenhum turn/done virá, então volta a "idle".
+    ("system", "startup"): "idle",
 }
 
 TURN_FLOW: tuple[tuple[str, str], ...] = (

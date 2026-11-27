@@ -94,7 +94,7 @@ Comandos: `nickel serve` · `nickel listen` (só modo local) · `nickel chat` (t
 
 ## Monitor e auditoria
 
-A aba **Monitor** da UI mostra, ao vivo, a fase do agente (roteando, pensando, executando ferramenta etc.), o raciocínio do modelo, as ferramentas usadas e a linha do tempo de cada execução. Para o modelo pensar antes de responder, marque **Pensar antes de responder** no campo de mensagem da aba Conversa; sem mexer na caixa, vale o padrão do servidor (`think` do workspace ativo ou `LLM_THINK`). O monitor não tem autenticação. O servidor escuta só em `127.0.0.1`, mas o guia da Oracle ([seção 6](docs/deploy/oracle-runpod.md#6-celular-opcional)) publica a UI, com o monitor, na sua tailnet com `tailscale serve`: qualquer aparelho da tailnet consegue abri-la.
+A tela **Monitor** da UI (menu lateral) mostra, ao vivo, a fase do agente (roteando, pensando, executando ferramenta etc.), o raciocínio do modelo, as ferramentas usadas e a linha do tempo de cada execução; na **Conversa**, a linha de status e a esfera seguem a mesma fase. Para o modelo pensar antes de responder, ative o botão **Pensar** no campo de mensagem da Conversa (ou do Início); sem mexer nele, vale o padrão do servidor (`think` do workspace ativo ou `LLM_THINK`). O monitor não tem autenticação. O servidor escuta só em `127.0.0.1`, mas o guia da Oracle ([seção 6](docs/deploy/oracle-runpod.md#6-celular-opcional)) publica a UI, com o monitor, na sua tailnet com `tailscale serve`: qualquer aparelho da tailnet consegue abri-la.
 
 Pela linha de comando:
 

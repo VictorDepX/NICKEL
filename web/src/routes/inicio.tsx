@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { BrainIcon, SendHorizontalIcon } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Orb } from "@/components/orb";
 import { Toggle } from "@/components/ui/toggle";
-import { APP_STATE_KEY, useAppState } from "@/hooks/use-app-state";
+import { useAppState } from "@/hooks/use-app-state";
 import { useEvents } from "@/hooks/use-events";
-import { PENDING_KEY, nextReminder, usePending, useReminders, useWorkspaces } from "@/hooks/use-shell-data";
-import { cancelPending, confirmPending, getMessages, toggleVoice, type PendingAction } from "@/lib/api";
+import { useResolvePending } from "@/hooks/use-resolve-pending";
+import { nextReminder, usePending, useReminders, useWorkspaces } from "@/hooks/use-shell-data";
+import { getMessages, toggleVoice, type PendingAction } from "@/lib/api";
 import { chatStatus } from "@/lib/monitor-core";
 import { MESSAGES_KEY, readThink, writeThink } from "@/lib/conversa-prefs";
 import { cn } from "@/lib/utils";
@@ -84,11 +85,13 @@ function ReminderCard({ now }: { now: Date }) {
   );
 }
 
+/** Rótulos dos botões: memory_save pergunta "guardar?"; as demais ações sensíveis, "sim/não". */
+export function pendingLabels(tool: string): { confirm: string; cancel: string } {
+  return tool === "memory_save" ? { confirm: "Guardar", cancel: "Recusar" } : { confirm: "Sim", cancel: "Não" };
+}
+
 function PendingCard({ action }: { action: PendingAction | undefined }) {
-  const queryClient = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  // Ref (e não só estado): um clique duplo chega antes de o React desabilitar os botões.
-  const resolving = useRef(false);
+  const { resolve, busy } = useResolvePending();
 
   if (!action) {
     return (
@@ -99,26 +102,11 @@ function PendingCard({ action }: { action: PendingAction | undefined }) {
     );
   }
 
-  const resolve = async (decision: "confirm" | "cancel") => {
-    if (resolving.current) return;
-    resolving.current = true;
-    setBusy(true);
-    try {
-      await (decision === "confirm" ? confirmPending(action.id) : cancelPending(action.id));
-      queryClient.setQueryData<PendingAction[]>(PENDING_KEY, (items) => items?.filter((a) => a.id !== action.id));
-    } catch (err) {
-      toast.error(`${decision === "confirm" ? "Falha ao guardar" : "Falha ao recusar"}: ${errorText(err)}`);
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: APP_STATE_KEY });
-      void queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
-      try {
-        await queryClient.invalidateQueries({ queryKey: PENDING_KEY });
-      } finally {
-        resolving.current = false;
-        setBusy(false);
-      }
-    }
-  };
+  const labels = pendingLabels(action.tool);
+  const decide = (decision: "confirm" | "cancel") =>
+    resolve(action.id, decision, (result) => {
+      if (!result.ok) toast.error(`${decision === "confirm" ? "Falha ao confirmar" : "Falha ao recusar"}: ${errorText(result.error)}`);
+    });
 
   return (
     <section
@@ -127,22 +115,23 @@ function PendingCard({ action }: { action: PendingAction | undefined }) {
     >
       <h2 className={cn(CARD_TITLE, "text-warning-foreground")}>Aguardando você</h2>
       <p className="line-clamp-2 text-sm text-foreground">{action.summary}</p>
+      <span className="font-mono text-xs text-subtle-foreground">{action.tool}</span>
       <div className="mt-auto flex gap-2">
         <button
           type="button"
           disabled={busy}
-          onClick={() => void resolve("confirm")}
+          onClick={() => void decide("confirm")}
           className="min-h-11 rounded-[10px] bg-warning px-4 text-[13px] font-semibold text-[#1a1204] hover:bg-warning/90 disabled:opacity-50 md:min-h-9"
         >
-          Guardar
+          {labels.confirm}
         </button>
         <button
           type="button"
           disabled={busy}
-          onClick={() => void resolve("cancel")}
+          onClick={() => void decide("cancel")}
           className="min-h-11 rounded-[10px] border border-input px-4 text-[13px] text-foreground hover:bg-muted disabled:opacity-50 md:min-h-9"
         >
-          Recusar
+          {labels.cancel}
         </button>
       </div>
     </section>
@@ -179,7 +168,7 @@ function ContinueCard() {
   const workspaceId = appState?.workspace ?? workspaces?.active ?? "";
   const { data } = useQuery({
     queryKey: [...MESSAGES_KEY, workspaceId],
-    queryFn: () => getMessages(120),
+    queryFn: () => getMessages(120, workspaceId || undefined),
     refetchInterval: 15_000,
   });
   const last = [...(data ?? [])].reverse().find((m) => m.role === "user");
@@ -257,10 +246,7 @@ export default function Inicio() {
             {idle ? (
               <>
                 <span aria-hidden="true" className="size-2 rounded-full bg-success" />
-                <span>
-                  Pronto · toque na esfera ou segure{" "}
-                  <kbd className="rounded border border-border bg-muted px-1.5 font-mono text-xs">Espaço</kbd> para falar
-                </span>
+                <span>Pronto · toque na esfera para falar</span>
               </>
             ) : (
               <span>{status.text}</span>

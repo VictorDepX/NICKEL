@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { SearchIcon, ShieldAlertIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
@@ -17,16 +17,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { APP_STATE_KEY } from "@/hooks/use-app-state";
-import { PENDING_KEY, usePending } from "@/hooks/use-shell-data";
+import { useResolvePending } from "@/hooks/use-resolve-pending";
+import { usePending } from "@/hooks/use-shell-data";
 import {
-  cancelPending,
-  confirmPending,
   forgetMemory,
   getMemory,
   type MemoryEntry,
   type PendingAction,
 } from "@/lib/api";
-import { MESSAGES_KEY } from "@/lib/conversa-prefs";
 
 export const MEMORY_KEY = ["memory"] as const;
 
@@ -38,33 +36,13 @@ function savedDate(value: string): string {
 }
 
 function PendingMemoryRow({ action }: { action: PendingAction }) {
-  const queryClient = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  // Ref (e não só estado): um clique duplo chega antes de o React desabilitar os botões.
-  const resolving = useRef(false);
+  const { resolve, busy } = useResolvePending([MEMORY_KEY]);
 
-  const resolve = async (decision: "confirm" | "cancel") => {
-    if (resolving.current) return;
-    resolving.current = true;
-    setBusy(true);
-    try {
-      await (decision === "confirm" ? confirmPending(action.id) : cancelPending(action.id));
-      queryClient.setQueryData<PendingAction[]>(PENDING_KEY, (items) => items?.filter((a) => a.id !== action.id));
-      toast.success(decision === "confirm" ? "Guardado na memória." : "Recusado.");
-    } catch (err) {
-      toast.error(`${decision === "confirm" ? "Falha ao guardar" : "Falha ao recusar"}: ${errorText(err)}`);
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: MEMORY_KEY });
-      void queryClient.invalidateQueries({ queryKey: APP_STATE_KEY });
-      void queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
-      try {
-        await queryClient.invalidateQueries({ queryKey: PENDING_KEY });
-      } finally {
-        resolving.current = false;
-        setBusy(false);
-      }
-    }
-  };
+  const decide = (decision: "confirm" | "cancel") =>
+    resolve(action.id, decision, (result) => {
+      if (result.ok) toast.success(decision === "confirm" ? "Guardado na memória." : "Recusado.");
+      else toast.error(`${decision === "confirm" ? "Falha ao guardar" : "Falha ao recusar"}: ${errorText(result.error)}`);
+    });
 
   return (
     <Card
@@ -81,7 +59,7 @@ function PendingMemoryRow({ action }: { action: PendingAction }) {
         <Button
           type="button"
           disabled={busy}
-          onClick={() => void resolve("confirm")}
+          onClick={() => void decide("confirm")}
           className="min-h-11 rounded-[10px] bg-warning px-4 font-semibold text-[#1a1204] hover:bg-warning/90 md:min-h-9"
         >
           Guardar
@@ -90,7 +68,7 @@ function PendingMemoryRow({ action }: { action: PendingAction }) {
           type="button"
           variant="outline"
           disabled={busy}
-          onClick={() => void resolve("cancel")}
+          onClick={() => void decide("cancel")}
           className="min-h-11 rounded-[10px] px-4 md:min-h-9"
         >
           Recusar
