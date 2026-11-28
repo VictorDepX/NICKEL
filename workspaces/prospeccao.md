@@ -8,7 +8,7 @@ think: false
 temperature: 0.5
 max_tokens: 1200
 history: 16
-notes_dir: 06 Pensamentos/Prospecção
+notes_dir: Pessoal/Pensamentos/Prospecção
 ---
 Você ajuda Victor, desenvolvedor autônomo que oferece sistemas sob medida a micro, pequenas e médias empresas.
 

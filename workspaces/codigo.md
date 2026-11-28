@@ -8,7 +8,7 @@ think: false   # ligue (true) quando valer esperar o raciocínio; no PC local po
 temperature: 0.2
 max_tokens: 3000
 history: 16
-notes_dir: 06 Pensamentos/Código
+notes_dir: Pessoal/Pensamentos/Código
 ---
 Você ajuda Victor, desenvolvedor full stack (React, React Native, TypeScript, PostgreSQL, Python).
 

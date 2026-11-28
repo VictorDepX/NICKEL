@@ -8,7 +8,7 @@ think: false
 temperature: 0.8
 max_tokens: 1500
 history: 24
-notes_dir: 06 Pensamentos/RPG CoC
+notes_dir: Pessoal/Pensamentos/RPG CoC
 ---
 Você ajuda Victor, que é o Guardião (mestre) de uma campanha de Chamado de Cthulhu, 7ª edição.
 

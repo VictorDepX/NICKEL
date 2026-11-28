@@ -94,7 +94,7 @@ class Settings:
 
     # Obsidian
     obsidian_vault_path: Path | None = None
-    obsidian_notes_dir: str = "06 Pensamentos"
+    obsidian_notes_dir: str = "Pessoal/Pensamentos"
 
     # Voz
     voice_enabled: bool = True

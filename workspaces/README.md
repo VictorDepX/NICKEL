@@ -27,7 +27,7 @@ think: false            # raciocínio do modelo (mais lento, mais cuidadoso)
 temperature: 0.8
 max_tokens: 1500
 history: 24             # mensagens de histórico enviadas ao modelo
-notes_dir: 06 Pensamentos/RPG CoC   # pasta (dentro do vault) usada por notes_capture e notes_search
+notes_dir: Pessoal/Pensamentos/RPG CoC   # pasta (dentro do vault) usada por notes_capture e notes_search
 ---
 Instruções do workspace, em Markdown. Entram no system prompt, depois da persona base.
 ```

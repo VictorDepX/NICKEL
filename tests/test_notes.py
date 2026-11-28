@@ -72,7 +72,7 @@ def test_capture_tool_end_to_end(services, llm, vault):
     reply = run(Agent(services, build_registry()).handle(
         Turn(channel="voice", text="anota aí um inquilino que só existe de noite")))
     assert reply.text == "Anotado."
-    note = vault / "06 Pensamentos" / "Ideia de conto.md"
+    note = vault / "Pessoal" / "Pensamentos" / "Ideia de conto.md"
     text = note.read_text(encoding="utf-8")
     assert "fonte: voz" in text
     assert "> anota aí um inquilino que só existe de noite" in text
